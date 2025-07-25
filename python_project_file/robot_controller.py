@@ -21,36 +21,32 @@ enableStatus_robot = None
 robotErrorState = False
 globalLockValue = threading.Lock()
 
-# Dobot API 임포트 (더미 클래스 포함)
-if DEPENDENCIES['DOBOT_AVAILABLE']:
-    try:
-        from dobot_api import DobotApiDashboard, DobotApi, DobotApiMove, MyType, alarmAlarmJsonFile
-    except ImportError:
-        DEPENDENCIES['DOBOT_AVAILABLE'] = False
-
-if not DEPENDENCIES['DOBOT_AVAILABLE']:
-    # Dobot API가 없을 때 더미 클래스 정의
+# 향상된 Dobot API 핸들러 사용
+try:
+    from dobot_api_handler import (
+        DOBOT_API_AVAILABLE, DobotApiDashboard, DobotApiMove, 
+        DobotApi, MyType, alarmAlarmJsonFile
+    )
+    print("✅ Dobot API 핸들러 로드 성공")
+except ImportError as e:
+    print(f"⚠️ Dobot API 핸들러 로드 실패: {e}")
+    # 기본 더미 클래스 정의
+    DOBOT_API_AVAILABLE = False
+    
     class DobotApiDashboard:
-        def __init__(self, ip, port):
-            pass
-        def EnableRobot(self):
-            pass
-        def DisableRobot(self):
-            pass
-        def GetErrorID(self):
-            return "0"
-        def ClearError(self):
-            pass
-        def Continue(self):
-            pass
-        def DO(self, idx, status):
-            pass
+        def __init__(self, ip, port): pass
+        def EnableRobot(self): return True
+        def DisableRobot(self): return True
+        def GetErrorID(self): return "0"
+        def ClearError(self): return True
+        def Continue(self): return True
+        def DO(self, idx, status): return True
    
     class DobotApiMove:
-        def __init__(self, ip, port):
-            pass
-        def MovL(self, x, y, z, r):
-            pass
+        def __init__(self, ip, port): pass
+        def MovL(self, x, y, z, r): 
+            time.sleep(0.5)  # 시뮬레이션 딜레이
+            return True
    
     class DobotApi:
         def __init__(self, ip, port):
@@ -79,18 +75,23 @@ class RobotController:
         
     def connect(self) -> bool:
         """로봇 연결 (안전한 로깅)"""
-        if not DEPENDENCIES['DOBOT_AVAILABLE']:
+        if not DOBOT_API_AVAILABLE:
             try:
                 self.logger.warning("Dobot API not available, running in simulation mode")
             except:
-                print("Dobot API not available, running in simulation mode")
+                print("⚠️ Dobot API가 사용 불가능합니다. 시뮬레이션 모드로 실행됩니다.")
+            # 시뮬레이션 모드에서도 더미 객체 생성
+            self.dashboard = DobotApiDashboard(self.config.ip_address, self.config.dashboard_port)
+            self.move = DobotApiMove(self.config.ip_address, self.config.move_port)
+            self.feed = DobotApi(self.config.ip_address, self.config.feed_port)
+            self.is_connected = False  # 시뮬레이션 표시
             return False
             
         try:
             try:
                 self.logger.info(f"Attempting robot connection: {self.config.ip_address}")
             except:
-                print(f"Attempting robot connection: {self.config.ip_address}")
+                print(f"🔌 로봇 연결 시도 중: {self.config.ip_address}")
             
             self.dashboard = DobotApiDashboard(self.config.ip_address, self.config.dashboard_port)
             self.move = DobotApiMove(self.config.ip_address, self.config.move_port)
@@ -104,7 +105,7 @@ class RobotController:
             try:
                 self.logger.info("Robot connection and activation completed")
             except:
-                print("Robot connection and activation completed")
+                print("✅ 로봇 연결 및 활성화 완료")
             
             # 피드백 및 에러 모니터링 스레드 시작
             self._start_monitoring_threads()
@@ -115,7 +116,12 @@ class RobotController:
             try:
                 self.logger.error(f"Robot connection failed: {e}")
             except:
-                print(f"Robot connection failed: {e}")
+                print(f"❌ 로봇 연결 실패: {e}")
+            # 연결 실패 시에도 시뮬레이션 모드 객체 생성
+            self.dashboard = DobotApiDashboard(self.config.ip_address, self.config.dashboard_port)
+            self.move = DobotApiMove(self.config.ip_address, self.config.move_port)
+            self.feed = DobotApi(self.config.ip_address, self.config.feed_port)
+            self.is_connected = False
             raise RobotConnectionError(f"Robot connection failed: {e}")
     
     def disconnect(self):
@@ -178,12 +184,18 @@ class RobotController:
                     self.status = RobotStatus.ERROR
                     raise RobotMovementError(f"Movement timeout: {position}")
             else:
-                # 시뮬레이션 모드
+                # 시뮬레이션 모드 (API 없거나 연결 실패 시)
                 try:
                     self.logger.info(f"Simulation: Moving to position {position}")
                 except:
-                    print(f"Simulation: Moving to position {position}")
-                time.sleep(0.5)  # 시뮬레이션 딜레이
+                    print(f"🎮 시뮬레이션: 위치 이동 {position}")
+                
+                # 시뮬레이션에서도 더미 객체가 있으면 호출
+                if hasattr(self, 'move') and self.move:
+                    self.move.MovL(*position)
+                else:
+                    time.sleep(0.5)  # 시뮬레이션 딜레이
+                    
                 self.current_position = position.copy()
                 return True
                 
@@ -208,7 +220,7 @@ class RobotController:
         def move_target():
             try:
                 self.move.MovL(*position)
-                if DEPENDENCIES['DOBOT_AVAILABLE']:
+                if DOBOT_API_AVAILABLE and self.is_connected:
                     self._wait_arrive(position)
                 result[0] = True
             except Exception as e:
@@ -244,12 +256,15 @@ class RobotController:
                 try:
                     self.logger.info(f"Gripper {action}")
                 except:
-                    print(f"Gripper {action}")
+                    print(f"🤏 그리퍼 {action}")
             else:
+                # 시뮬레이션 모드 또는 연결 없음
+                if hasattr(self, 'dashboard') and self.dashboard:
+                    self.dashboard.DO(1, 1 if activate else 0)
                 try:
                     self.logger.info(f"Simulation: Gripper {action}")
                 except:
-                    print(f"Simulation: Gripper {action}")
+                    print(f"🎮 시뮬레이션: 그리퍼 {action}")
             
             time.sleep(self.config.gripper_delay)
             return True
@@ -290,11 +305,11 @@ class RobotController:
     
     def _start_monitoring_threads(self):
         """모니터링 스레드 시작"""
-        if self.feed and DEPENDENCIES['DOBOT_AVAILABLE']:
+        if self.feed and DOBOT_API_AVAILABLE and self.is_connected:
             feed_thread = threading.Thread(target=self._feed_monitor, daemon=True)
             feed_thread.start()
         
-        if self.dashboard and DEPENDENCIES['DOBOT_AVAILABLE']:
+        if self.dashboard and DOBOT_API_AVAILABLE and self.is_connected:
             error_thread = threading.Thread(target=self._error_monitor, daemon=True)
             error_thread.start()
     
