@@ -9,15 +9,18 @@ from typing import Dict, Any
 
 @dataclass
 class RobotConfig:
-    """로봇 설정"""
+    """로봇 설정 (통신 안정성 강화)"""
     ip_address: str = "192.168.1.6"
     dashboard_port: int = 29999
     move_port: int = 30003
     feed_port: int = 30004
-    movement_timeout: float = 30.0
-    position_tolerance: float = 1.0
-    gripper_delay: float = 1.0
+    movement_timeout: float = 45.0  # 타임아웃 시간 증가 (30 -> 45초)
+    position_tolerance: float = 2.0  # 위치 허용 오차 증가 (1.0 -> 2.0)
+    gripper_delay: float = 1.5  # 그리퍼 딜레이 증가 (1.0 -> 1.5초)
     safety_height_offset: float = 50.0
+    connection_check_interval: float = 5.0  # 연결 상태 확인 간격
+    max_retry_count: int = 3  # 최대 재시도 횟수
+    retry_delay: float = 1.0  # 재시도 간격
 
 @dataclass
 class WorkspaceLimit:
