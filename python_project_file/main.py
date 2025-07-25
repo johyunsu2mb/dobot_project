@@ -157,9 +157,9 @@ class FurnitureOrderSystem:
         pickup_thread.start()
 
     def _enhanced_pickup_sequence_worker(self, furniture_name: str, position: List[float]):
-        """향상된 백그라운드 픽업 시퀀스 (통신 안정성 강화)"""
+        """향상된 백그라운드 픽업 시퀀스 (완전한 8단계 시퀀스)"""
         success_steps = []
-        total_steps = 7
+        total_steps = 8  # 8단계로 증가
         
         try:
             # 1. 안전 위치로 이동
@@ -170,7 +170,7 @@ class FurnitureOrderSystem:
                 position[3]
             ]
             
-            self.log_display.add_message(f"1/7. 안전 위치로 이동: {safe_position}")
+            self.log_display.add_message(f"1/8. 안전 위치로 이동: {safe_position}")
             success = self.robot_controller.move_to_position(safe_position, retry_count=3)
             if not success:
                 raise RobotMovementError("안전 위치 이동 실패")
@@ -178,7 +178,7 @@ class FurnitureOrderSystem:
             time.sleep(0.3)
            
             # 2. 그리퍼 열기
-            self.log_display.add_message(f"2/7. 그리퍼 열기")
+            self.log_display.add_message(f"2/8. 그리퍼 열기")
             success = self.robot_controller.control_gripper(False, retry_count=3)
             if not success:
                 raise GripperError("그리퍼 열기 실패")
@@ -186,7 +186,7 @@ class FurnitureOrderSystem:
             time.sleep(0.3)
            
             # 3. 목표 위치로 하강
-            self.log_display.add_message(f"3/7. {furniture_name} 위치로 하강: {position}")
+            self.log_display.add_message(f"3/8. {furniture_name} 위치로 하강: {position}")
             success = self.robot_controller.move_to_position(position, retry_count=3)
             if not success:
                 raise RobotMovementError(f"{furniture_name} 위치 이동 실패")
@@ -194,7 +194,7 @@ class FurnitureOrderSystem:
             time.sleep(0.3)
            
             # 4. 그리퍼 닫기 (물체 집기)
-            self.log_display.add_message(f"4/7. {furniture_name} 집기 - 그리퍼 활성화")
+            self.log_display.add_message(f"4/8. {furniture_name} 집기 - 그리퍼 활성화")
             success = self.robot_controller.control_gripper(True, retry_count=3)
             if not success:
                 raise GripperError("그리퍼 닫기 실패")
@@ -204,7 +204,7 @@ class FurnitureOrderSystem:
             time.sleep(0.5)  # 그리퍼 안정화 시간
            
             # 5. 안전 위치로 상승
-            self.log_display.add_message(f"5/7. 물체를 들고 안전 위치로 상승")
+            self.log_display.add_message(f"5/8. 물체를 들고 안전 위치로 상승")
             success = self.robot_controller.move_to_position(safe_position, retry_count=3)
             if not success:
                 raise RobotMovementError("안전 위치 상승 실패")
@@ -213,27 +213,35 @@ class FurnitureOrderSystem:
            
             # 6. 베이스 위치로 이동
             base_position = [300, -30, 5, 0]
-            self.log_display.add_message(f"6/7. 베이스 위치로 이동: {base_position}")
+            self.log_display.add_message(f"6/8. 베이스 위치로 이동: {base_position}")
             success = self.robot_controller.move_to_position(base_position, retry_count=3)
             if not success:
                 raise RobotMovementError("베이스 위치 이동 실패")
             success_steps.append("베이스 위치 이동")
             time.sleep(0.3)
            
-            # 7. 수정된 로직: 최종 배치 위치로 이동 (그리퍼 유지)
+            # 7. 최종 배치 위치로 이동
             final_position = [350, 0, position[2], position[3]]  # 물건의 Z좌표 사용
-            self.log_display.add_message(f"7/7. 최종 배치 위치로 이동: {final_position}")
+            self.log_display.add_message(f"7/8. 최종 배치 위치로 이동: {final_position}")
             success = self.robot_controller.move_to_position(final_position, retry_count=3)
             if not success:
                 raise RobotMovementError("최종 위치 이동 실패")
             self.robot_controller.status = RobotStatus.PLACING
             success_steps.append("최종 위치 이동")
             time.sleep(0.5)
+            
+            # 8. 그리퍼 열기 (물체 놓기) - 새로 추가된 단계!
+            self.log_display.add_message(f"8/8. {furniture_name} 배치 완료 - 그리퍼 해제")
+            success = self.robot_controller.control_gripper(False, retry_count=3)
+            if not success:
+                raise GripperError("최종 그리퍼 해제 실패")
+            success_steps.append("최종 그리퍼 해제")
+            time.sleep(0.5)
            
-            # 8. 작업 완료 (그리퍼는 열지 않음)
+            # 9. 작업 완료
             self.log_display.add_message(f"[SUCCESS] {furniture_name} 픽업 및 배치 시퀀스 완료!")
             self.log_display.add_message(f"[INFO] 성공한 단계: {', '.join(success_steps)}")
-            self.log_display.add_message(f"[INFO] 최종 위치: {final_position} (그리퍼 유지)")
+            self.log_display.add_message(f"[INFO] 최종 위치: {final_position} (물체 배치 완료)")
            
             self.order_logger.log_order(furniture_name, "완료", f"최종위치: {final_position}, 단계: {len(success_steps)}/{total_steps}")
             
@@ -371,7 +379,7 @@ class FurnitureOrderSystem:
         self.connection_monitor_active = False
 
     def _pickup_sequence_complete(self, furniture_name: str, success: bool):
-        """픽업 시퀀스 완료 처리 (안전한 메시지)"""
+        """픽업 시퀀스 완료 처리 (완전한 8단계 버전)"""
         self.is_processing = False
         from config import RobotStatus
         self.robot_controller.status = RobotStatus.IDLE
@@ -381,15 +389,19 @@ class FurnitureOrderSystem:
             self.update_robot_status(f"로봇 상태: {furniture_name} 작업 완료", UI_COLORS['success'])
             messagebox.showinfo(
                 "작업 완료",
-                f"[PARTY] {furniture_name} 픽업 및 배치 작업이 성공적으로 완료되었습니다!\n"
-                f"최종 위치: [350, 0, 물건Z좌표, 회전값]\n"
-                f"안정성 강화 버전으로 완료됨"
+                f"🎉 {furniture_name} 픽업 및 배치 작업이 성공적으로 완료되었습니다!\n\n"
+                f"📋 완료된 8단계:\n"
+                f"1. 안전 위치 이동 → 2. 그리퍼 열기 → 3. 물체 위치 하강\n"
+                f"4. 물체 집기 → 5. 안전 위치 상승 → 6. 베이스 이동\n" 
+                f"7. 최종 위치 이동 → 8. 물체 배치 (그리퍼 해제)\n\n"
+                f"📍 최종 위치: [350, 0, 물건Z좌표, 회전값]\n"
+                f"✨ {furniture_name}이(가) 성공적으로 배치되었습니다!"
             )
         else:
             self.update_robot_status("로봇 상태: 작업 실패", UI_COLORS['error'])
             messagebox.showerror(
                 "작업 실패",
-                f"[CROSS] {furniture_name} 픽업 작업이 실패했습니다.\n"
+                f"❌ {furniture_name} 픽업 작업이 실패했습니다.\n"
                 f"에러 복구 기능이 작동했습니다.\n"
                 f"로그를 확인하여 원인을 파악해주세요."
             )
