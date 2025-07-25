@@ -3,33 +3,47 @@
 ## ⚡ 5분 만에 시작하기
 
 ### 1️⃣ 파일 준비 (1분)
-모든 파일을 동일한 폴더에 저장하세요:
+모든 파일을 `python_project_file` 폴더에 저장하세요:
 ```
-enhanced_dobot_system/
-├── main.py
-├── config.py
-├── logger_setup.py
-├── utils.py
-├── robot_controller.py
-├── yolo_detector.py
-├── ui_components.py
-├── requirements.txt
-├── setup.py
-└── test_system.py
+python_project_file/
+├── main.py                      # 메인 애플리케이션  
+├── config.py                   # 설정 파일
+├── dobot_api_handler.py        # **NEW!** API 핸들러 (중요!)
+├── robot_controller.py         # 로봇 제어
+├── yolo_detector.py           # YOLO 검출
+├── ui_components.py           # UI 컴포넌트
+├── logger_setup.py            # 로깅 설정
+├── utils.py                   # 유틸리티
+├── diagnose_dobot.py          # **NEW!** 진단 도구
+├── integration_test.py        # **NEW!** 통합 테스트
+├── run.bat / run.sh           # **NEW!** 실행 스크립트
+├── requirements.txt           # 패키지 목록
+└── 기타 문서들...
 ```
 
 ### 2️⃣ 자동 설치 실행 (3분)
 ```bash
-# Windows
+# 자동 설치 (권장)
 python setup.py
 
 # 또는 수동 설치
-pip install numpy matplotlib opencv-python ultralytics pillow pyyaml
+pip install numpy matplotlib opencv-python ultralytics pillow pyyaml pydobot
 ```
 
 ### 3️⃣ 즉시 실행 (1분)
 ```bash
+# 방법 1: 직접 실행
 python main.py
+
+# 방법 2: 실행 스크립트 사용 (권장)
+# Windows
+run.bat
+# 또는 Linux/macOS  
+chmod +x run.sh && ./run.sh
+
+# 방법 3: 진단 후 실행
+python diagnose_dobot.py  # 문제가 있는 경우
+python integration_test.py  # 전체 테스트
 ```
 
 ## 🎯 첫 번째 테스트
@@ -66,6 +80,20 @@ python main.py
 
 ## 🔧 문제 해결
 
+### ❌ "Dobot API를 찾을 수 없습니다" 오류 (NEW!)
+```bash
+# 1단계: 진단 도구 실행
+python diagnose_dobot.py
+
+# 2단계: 권장 API 설치
+pip install pydobot
+
+# 3단계: 대체 방법
+pip install pyserial
+```
+
+**💡 참고**: API 없이도 시뮬레이션 모드로 모든 기능 테스트 가능!
+
 ### ❌ "ModuleNotFoundError" 오류
 ```bash
 # 패키지 재설치
@@ -84,23 +112,53 @@ python -c "import cv2; cap = cv2.VideoCapture(0); print('Camera OK' if cap.isOpe
 ### ❌ YOLO 모델 다운로드 실패
 인터넷 연결 확인 후 다시 실행하세요. 첫 실행 시 자동으로 모델을 다운로드합니다.
 
-## 🧪 시스템 테스트
+## 🧪 시스템 진단 및 테스트
 
-전체 시스템이 정상 동작하는지 확인:
+### 🔍 문제 진단 (Dobot API 문제 해결)
 ```bash
-python test_system.py
+python diagnose_dobot.py
 ```
 
 예상 출력:
 ```
-🧪 Enhanced Dobot Robot System 테스트 시작
-✅ config.py 임포트 성공
-✅ logger_setup.py 동작 확인
-✅ utils.py 함수들 동작 확인
-✅ robot_controller.py 시뮬레이션 모드 확인
-✅ yolo_detector.py YOLO 모델 로드 확인
-✅ ui_components.py 컴포넌트 생성 확인
-🎉 모든 테스트가 성공적으로 완료되었습니다!
+🤖======================================================🤖
+     Enhanced Dobot Robot System - API 진단 도구
+🤖======================================================🤖
+
+🔍 Dobot API 설정 진단 중...
+✅ Python 버전: 3.9.0
+⚠️ Dobot API 가용성: 사용불가
+💡 권장사항:
+  1. 가장 쉬운 방법: pip install pydobot
+  2. 공식 Dobot Studio와 함께 설치
+  ...
+✨ 시뮬레이션 모드는 API 없이도 정상 작동합니다!
+```
+
+### 🧪 통합 테스트
+```bash
+python integration_test.py
+```
+
+예상 출력:
+```
+🧪======================================================================🧪
+    Enhanced Dobot Robot System - 통합 테스트
+🧪======================================================================🧪
+
+✅ PASS       Python 버전
+✅ PASS       파일 main.py
+✅ PASS       Dobot API 핸들러 로드
+⚠️ WARNING    YOLO 모델 로드 (모델 없음, 정상)
+✅ PASS       가구 픽업 워크플로우
+
+📊 테스트 결과 요약
+전체 테스트: 25개
+✅ 성공: 22개
+❌ 실패: 0개
+⚠️ 경고: 3개
+
+🎉 모든 테스트가 성공했습니다! 시스템이 완벽히 준비되었습니다.
 ```
 
 ## 🎮 주요 기능 사용법
@@ -126,6 +184,13 @@ python test_system.py
 | 전체 리셋 | 좌측 패널 리셋 버튼 | 시스템 완전 초기화 |
 | 로그 확인 | 우측 패널 하단 | 실시간 로그 모니터링 |
 
+### 🔍 새로운 진단 도구 (NEW!)
+| 도구 | 명령어 | 용도 |
+|------|--------|------|
+| API 진단 | `python diagnose_dobot.py` | Dobot API 설치/연결 문제 해결 |
+| 통합 테스트 | `python integration_test.py` | 전체 시스템 동작 확인 |
+| 실행 스크립트 | `run.bat` / `./run.sh` | 안전한 시스템 시작 |
+
 ## 🎯 향상된 픽업 로직 (NEW!)
 
 기존 문제점을 해결한 새로운 로직:
@@ -146,11 +211,46 @@ python test_system.py
 - `logs/robot_system.log`: 전체 시스템 로그
 - `logs/order_log.txt`: 주문 처리 로그
 
-### 💡 팁
-- 실제 로봇 없이도 모든 기능 테스트 가능
-- 시뮬레이션 모드에서 로직 검증 후 실제 로봇 연결 권장
-- 첫 실행 시 YOLO 모델 다운로드로 시간이 걸릴 수 있음
+### 💡 팁 및 해결책
+
+### 🤖 Dobot API 관련
+- **API 없음**: 정상입니다! 시뮬레이션 모드로 모든 기능 테스트 가능
+- **연결 실패**: `python diagnose_dobot.py` 실행하여 문제 진단
+- **실제 로봇 연결**: `pip install pydobot` 후 USB/전원 확인
+
+### 📷 카메라 관련  
+- **카메라 인식 안됨**: 다른 프로그램이 사용 중인지 확인
+- **YOLO 모델 다운로드 실패**: 인터넷 연결 확인 후 재시도
+- **객체 인식 정확도 낮음**: 조명 개선 및 카메라 각도 조정
+
+### 🖥️ 시스템 관련
+- **폰트 깨짐**: `fonts/` 폴더에 `NanumGothic.ttf` 파일 추가
+- **GUI 크기 문제**: 디스플레이 배율 설정 확인
+- **느린 실행**: 가상환경 사용 및 백그라운드 프로그램 종료
+
+### 🔧 문제 해결 순서
+1. **진단 도구**: `python diagnose_dobot.py`
+2. **통합 테스트**: `python integration_test.py`  
+3. **로그 확인**: `logs/robot_system.log` 파일 검토
+4. **재설치**: `python setup.py` 재실행
+5. **문서 참조**: `TROUBLESHOOTING.md` 확인
 
 ---
 
-**🎉 설치 완료! 이제 Enhanced Dobot Robot System을 사용할 준비가 되었습니다!**
+## 🎉 설치 완료!
+
+**✨ Enhanced Dobot Robot System 준비 완료! ✨**
+
+### 🚀 다음 단계:
+1. **첫 실행**: `python main.py` 또는 `run.bat` 실행  
+2. **시뮬레이션 테스트**: 가구 버튼 클릭하여 픽업 시퀀스 확인
+3. **실제 로봇 연결**: `pip install pydobot` 후 하드웨어 연결
+4. **카메라 테스트**: 웹캠 연결 후 YOLO 객체 인식 시도
+
+### 📞 도움이 필요하면:
+- **📖 상세 가이드**: `README.md`
+- **🔧 문제 해결**: `TROUBLESHOOTING.md`  
+- **✅ 설치 체크**: `INSTALLATION_CHECKLIST.md`
+- **🏗️ 구조 이해**: `PROJECT_STRUCTURE.md`
+
+**💡 기억하세요**: Dobot API가 없어도 완벽한 시뮬레이션으로 모든 기능을 체험할 수 있습니다!
