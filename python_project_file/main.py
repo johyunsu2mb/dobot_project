@@ -58,6 +58,10 @@ class FurnitureOrderSystem:
         self.cap = None
         self.total_orders = 0
         self.successful_orders = 0
+        
+        # 연결 모니터링 변수 추가
+        self.connection_monitor_active = False
+        self.last_connection_check = time.time()
        
         # 향상된 로봇 컨트롤러
         self.robot_config = RobotConfig()
@@ -83,6 +87,9 @@ class FurnitureOrderSystem:
         
         # 로봇 연결 시도
         self.connect_robot()
+        
+        # 연결 모니터링 시작
+        self.start_connection_monitoring()
        
         self.setup_ui()
         
@@ -150,7 +157,10 @@ class FurnitureOrderSystem:
         pickup_thread.start()
 
     def _enhanced_pickup_sequence_worker(self, furniture_name: str, position: List[float]):
-        """향상된 백그라운드 픽업 시퀀스 (수정된 로직, 안전한 로깅)"""
+        """향상된 백그라운드 픽업 시퀀스 (통신 안정성 강화)"""
+        success_steps = []
+        total_steps = 7
+        
         try:
             # 1. 안전 위치로 이동
             safe_position = [
@@ -160,49 +170,72 @@ class FurnitureOrderSystem:
                 position[3]
             ]
             
-            self.log_display.add_message(f"1. 안전 위치로 이동: {safe_position}")
-            self.robot_controller.move_to_position(safe_position)
-            time.sleep(0.5)
+            self.log_display.add_message(f"1/7. 안전 위치로 이동: {safe_position}")
+            success = self.robot_controller.move_to_position(safe_position, retry_count=3)
+            if not success:
+                raise RobotMovementError("안전 위치 이동 실패")
+            success_steps.append("안전 위치 이동")
+            time.sleep(0.3)
            
             # 2. 그리퍼 열기
-            self.log_display.add_message("2. 그리퍼 열기")
-            self.robot_controller.control_gripper(False)
+            self.log_display.add_message(f"2/7. 그리퍼 열기")
+            success = self.robot_controller.control_gripper(False, retry_count=3)
+            if not success:
+                raise GripperError("그리퍼 열기 실패")
+            success_steps.append("그리퍼 열기")
+            time.sleep(0.3)
            
             # 3. 목표 위치로 하강
-            self.log_display.add_message(f"3. {furniture_name} 위치로 하강: {position}")
-            self.robot_controller.move_to_position(position)
-            time.sleep(0.5)
+            self.log_display.add_message(f"3/7. {furniture_name} 위치로 하강: {position}")
+            success = self.robot_controller.move_to_position(position, retry_count=3)
+            if not success:
+                raise RobotMovementError(f"{furniture_name} 위치 이동 실패")
+            success_steps.append("목표 위치 이동")
+            time.sleep(0.3)
            
             # 4. 그리퍼 닫기 (물체 집기)
-            self.log_display.add_message(f"4. {furniture_name} 집기 - 그리퍼 활성화")
-            self.robot_controller.control_gripper(True)
+            self.log_display.add_message(f"4/7. {furniture_name} 집기 - 그리퍼 활성화")
+            success = self.robot_controller.control_gripper(True, retry_count=3)
+            if not success:
+                raise GripperError("그리퍼 닫기 실패")
             from config import RobotStatus
             self.robot_controller.status = RobotStatus.CARRYING
+            success_steps.append("그리퍼 닫기")
+            time.sleep(0.5)  # 그리퍼 안정화 시간
            
             # 5. 안전 위치로 상승
-            self.log_display.add_message("5. 물체를 들고 안전 위치로 상승")
-            self.robot_controller.move_to_position(safe_position)
-            time.sleep(0.5)
+            self.log_display.add_message(f"5/7. 물체를 들고 안전 위치로 상승")
+            success = self.robot_controller.move_to_position(safe_position, retry_count=3)
+            if not success:
+                raise RobotMovementError("안전 위치 상승 실패")
+            success_steps.append("안전 위치 상승")
+            time.sleep(0.3)
            
             # 6. 베이스 위치로 이동
             base_position = [300, -30, 5, 0]
-            self.log_display.add_message(f"6. 베이스 위치로 이동: {base_position}")
-            self.robot_controller.move_to_position(base_position)
-            time.sleep(0.5)
+            self.log_display.add_message(f"6/7. 베이스 위치로 이동: {base_position}")
+            success = self.robot_controller.move_to_position(base_position, retry_count=3)
+            if not success:
+                raise RobotMovementError("베이스 위치 이동 실패")
+            success_steps.append("베이스 위치 이동")
+            time.sleep(0.3)
            
             # 7. 수정된 로직: 최종 배치 위치로 이동 (그리퍼 유지)
-            # [350, 0, 물건의 Z좌표값, 임의값]으로 이동
             final_position = [350, 0, position[2], position[3]]  # 물건의 Z좌표 사용
-            self.log_display.add_message(f"7. 최종 배치 위치로 이동: {final_position}")
-            self.robot_controller.move_to_position(final_position)
+            self.log_display.add_message(f"7/7. 최종 배치 위치로 이동: {final_position}")
+            success = self.robot_controller.move_to_position(final_position, retry_count=3)
+            if not success:
+                raise RobotMovementError("최종 위치 이동 실패")
             self.robot_controller.status = RobotStatus.PLACING
-            time.sleep(1.0)
+            success_steps.append("최종 위치 이동")
+            time.sleep(0.5)
            
             # 8. 작업 완료 (그리퍼는 열지 않음)
             self.log_display.add_message(f"[SUCCESS] {furniture_name} 픽업 및 배치 시퀀스 완료!")
+            self.log_display.add_message(f"[INFO] 성공한 단계: {', '.join(success_steps)}")
             self.log_display.add_message(f"[INFO] 최종 위치: {final_position} (그리퍼 유지)")
            
-            self.order_logger.log_order(furniture_name, "완료", f"최종위치: {final_position}")
+            self.order_logger.log_order(furniture_name, "완료", f"최종위치: {final_position}, 단계: {len(success_steps)}/{total_steps}")
             
             # UI 업데이트를 메인 스레드에서 실행
             self.root.after(0, lambda: self._pickup_sequence_complete(furniture_name, True))
@@ -210,16 +243,161 @@ class FurnitureOrderSystem:
         except (RobotMovementError, InvalidPositionError, GripperError, TimeoutError) as e:
             error_msg = f"[ERROR] {furniture_name} 픽업 실패: {str(e)}"
             self.log_display.add_message(error_msg)
-            self.order_logger.log_order(furniture_name, "실패", str(e))
-            self.root.after(0, lambda: self._pickup_sequence_complete(furniture_name, False))
+            self.log_display.add_message(f"[INFO] 성공한 단계 ({len(success_steps)}/{total_steps}): {', '.join(success_steps) if success_steps else '없음'}")
+            
+            # 에러 복구 시도
+            recovery_success = self._attempt_error_recovery(furniture_name, success_steps)
+            
+            self.order_logger.log_order(furniture_name, "실패", f"{str(e)}, 단계: {len(success_steps)}/{total_steps}")
+            self.root.after(0, lambda: self._pickup_sequence_complete(furniture_name, recovery_success))
+            
         except Exception as e:
             error_msg = f"[ERROR] {furniture_name} 픽업 중 예상치 못한 오류: {str(e)}"
             self.log_display.add_message(error_msg)
+            self.log_display.add_message(f"[INFO] 성공한 단계 ({len(success_steps)}/{total_steps}): {', '.join(success_steps) if success_steps else '없음'}")
             self.logger.error(error_msg)
-            self.order_logger.log_order(furniture_name, "오류", str(e))
-            self.root.after(0, lambda: self._pickup_sequence_complete(furniture_name, False))
+            
+            # 에러 복구 시도
+            recovery_success = self._attempt_error_recovery(furniture_name, success_steps)
+            
+            self.order_logger.log_order(furniture_name, "오류", f"{str(e)}, 단계: {len(success_steps)}/{total_steps}")
+            self.root.after(0, lambda: self._pickup_sequence_complete(furniture_name, recovery_success))
+    
+    def _attempt_error_recovery(self, furniture_name: str, success_steps: List[str]) -> bool:
+        """에러 발생 시 복구 시도"""
+        try:
+            self.log_display.add_message(f"[RECOVERY] {furniture_name} 에러 복구 시도 중...")
+            
+            # 1. 연결 상태 확인 및 재연결
+            if not self.robot_controller._check_connection():
+                self.log_display.add_message("[RECOVERY] 연결 상태 복구 중...")
+                if self.robot_controller._reconnect():
+                    self.log_display.add_message("[RECOVERY] 연결 복구 성공")
+                else:
+                    self.log_display.add_message("[RECOVERY] 연결 복구 실패")
+                    return False
+            
+            # 2. 안전 위치로 이동 시도
+            safe_position = [0, 0, 50, 0]  # 안전한 홈 위치
+            self.log_display.add_message("[RECOVERY] 안전 위치로 이동 중...")
+            
+            try:
+                success = self.robot_controller.move_to_position(safe_position, retry_count=2)
+                if success:
+                    self.log_display.add_message("[RECOVERY] 안전 위치 이동 성공")
+                    
+                    # 3. 그리퍼 상태 정리
+                    self.robot_controller.control_gripper(False, retry_count=2)
+                    self.log_display.add_message("[RECOVERY] 그리퍼 해제 완료")
+                    
+                    return True
+                else:
+                    self.log_display.add_message("[RECOVERY] 안전 위치 이동 실패")
+                    return False
+                    
+            except Exception as e:
+                self.log_display.add_message(f"[RECOVERY] 복구 중 오류: {str(e)}")
+                return False
+                
+        except Exception as e:
+            self.log_display.add_message(f"[RECOVERY] 복구 시도 실패: {str(e)}")
+            return False
+
+    def start_connection_monitoring(self):
+        """연결 상태 모니터링 시작"""
+        if not self.connection_monitor_active:
+            self.connection_monitor_active = True
+            self.monitor_connection()
+    
+    def monitor_connection(self):
+        """연결 상태 주기적 모니터링"""
+        if not self.connection_monitor_active:
+            return
+        
+        current_time = time.time()
+        
+        # 연결 확인 간격 체크
+        if current_time - self.last_connection_check >= self.robot_config.connection_check_interval:
+            self.last_connection_check = current_time
+            
+            # 작업 중이 아닐 때만 연결 상태 확인
+            if not self.is_processing:
+                self.check_and_update_connection_status()
+        
+        # 다음 체크 스케줄링 (1초마다)
+        self.root.after(1000, self.monitor_connection)
+    
+    def check_and_update_connection_status(self):
+        """연결 상태 확인 및 UI 업데이트"""
+        try:
+            # Dobot API 상태 확인
+            try:
+                from dobot_api_handler import DOBOT_API_AVAILABLE
+                dobot_api_status = DOBOT_API_AVAILABLE
+            except ImportError:
+                dobot_api_status = False
+            
+            # 실제 연결 상태 확인
+            connection_ok = False
+            if self.robot_controller.is_connected:
+                connection_ok = self.robot_controller._check_connection()
+                if not connection_ok:
+                    self.log_display.add_message("[WARNING] 로봇 연결이 끊어진 것으로 감지됨")
+                    self.robot_controller.is_connected = False
+            
+            # UI 상태 업데이트
+            self.update_connection_ui(connection_ok, dobot_api_status)
+            
+        except Exception as e:
+            self.logger.error(f"Connection monitoring error: {e}")
+    
+    def update_connection_ui(self, connected: bool, api_available: bool):
+        """연결 상태에 따른 UI 업데이트"""
+        if hasattr(self, 'robot_connection_label'):
+            if connected:
+                status_text = "[GREEN] Robot Connected"
+                status_color = UI_COLORS['success']
+            elif api_available:
+                status_text = "[YELLOW] API Available (Disconnected)"
+                status_color = UI_COLORS['warning']
+            else:
+                status_text = "[RED] Simulation Mode"
+                status_color = UI_COLORS['error']
+            
+            self.robot_connection_label.config(text=status_text, fg=status_color)
+    
+    def stop_connection_monitoring(self):
+        """연결 모니터링 중지"""
+        self.connection_monitor_active = False
 
     def _pickup_sequence_complete(self, furniture_name: str, success: bool):
+        """픽업 시퀀스 완료 처리 (안전한 메시지)"""
+        self.is_processing = False
+        from config import RobotStatus
+        self.robot_controller.status = RobotStatus.IDLE
+       
+        if success:
+            self.successful_orders += 1
+            self.update_robot_status(f"로봇 상태: {furniture_name} 작업 완료", UI_COLORS['success'])
+            messagebox.showinfo(
+                "작업 완료",
+                f"[PARTY] {furniture_name} 픽업 및 배치 작업이 성공적으로 완료되었습니다!\n"
+                f"최종 위치: [350, 0, 물건Z좌표, 회전값]\n"
+                f"안정성 강화 버전으로 완료됨"
+            )
+        else:
+            self.update_robot_status("로봇 상태: 작업 실패", UI_COLORS['error'])
+            messagebox.showerror(
+                "작업 실패",
+                f"[CROSS] {furniture_name} 픽업 작업이 실패했습니다.\n"
+                f"에러 복구 기능이 작동했습니다.\n"
+                f"로그를 확인하여 원인을 파악해주세요."
+            )
+       
+        self.total_orders += 1
+        
+        # 3초 후 상태 리셋
+        self.root.after(3000, self.reset_robot_status)
         """픽업 시퀀스 완료 처리 (안전한 메시지)"""
         self.is_processing = False
         from config import RobotStatus
@@ -772,7 +950,7 @@ class FurnitureOrderSystem:
         self.update_robot_status("로봇 상태: 대기 중")
 
     def reset_system(self):
-        """향상된 전체 시스템 리셋"""
+        """향상된 전체 시스템 리셋 (연결 모니터링 포함)"""
         if self.is_processing:
             result = messagebox.askyesno(
                 "확인",
@@ -783,6 +961,9 @@ class FurnitureOrderSystem:
                 return
        
         try:
+            # 연결 모니터링 일시 중지
+            self.stop_connection_monitoring()
+            
             # 카메라 정지
             if self.camera_active:
                 self.stop_camera()
@@ -805,6 +986,9 @@ class FurnitureOrderSystem:
             
             # 로봇 재연결 시도
             self.root.after(1000, self.connect_robot)
+            
+            # 연결 모니터링 재시작
+            self.root.after(2000, self.start_connection_monitoring)
        
             self.update_robot_status("로봇 상태: 리셋 완료")
             messagebox.showinfo("리셋 완료", "[REFRESH] 시스템이 안전하게 리셋되었습니다!")
@@ -812,6 +996,8 @@ class FurnitureOrderSystem:
         except Exception as e:
             self.logger.error(f"시스템 리셋 중 오류: {e}")
             messagebox.showerror("리셋 오류", f"시스템 리셋 중 오류가 발생했습니다:\n{str(e)}")
+            # 에러 발생 시에도 연결 모니터링 재시작
+            self.start_connection_monitoring()
 
     def load_yolo_labels(self):
         """YOLO 라벨 파일 로드"""
@@ -1053,7 +1239,7 @@ class FurnitureOrderSystem:
             self.log_display.add_message(message)
 
     def on_closing(self):
-        """향상된 프로그램 종료 처리"""
+        """향상된 프로그램 종료 처리 (연결 모니터링 포함)"""
         if self.is_processing:
             result = messagebox.askyesno(
                 "종료 확인",
@@ -1064,6 +1250,9 @@ class FurnitureOrderSystem:
                 return
        
         try:
+            # 연결 모니터링 중지
+            self.stop_connection_monitoring()
+            
             # 카메라 정리
             if self.camera_active:
                 self.stop_camera()
