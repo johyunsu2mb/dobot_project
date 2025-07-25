@@ -9,13 +9,16 @@ enhanced_dobot_system/
 ├── 📝 logger_setup.py           # 로깅 시스템 설정
 ├── 🔧 utils.py                  # 유틸리티 함수 및 에러 클래스
 ├── 🤖 robot_controller.py       # 로봇 제어 핵심 클래스 (버그 수정됨)
+├── 🛡️ dobot_api_handler.py      # Dobot API 핸들러 (NEW!)
 ├── 👁️ yolo_detector.py          # YOLO 객체 인식 시스템
 ├── 🖼️ ui_components.py          # GUI 컴포넌트들
 ├── 📦 requirements.txt          # 필요한 패키지 목록
 ├── 🛠️ setup.py                  # 자동 설치 스크립트
 ├── 🧪 test_system.py            # 시스템 테스트 스크립트
+├── 🔍 diagnose_dobot.py         # Dobot API 진단 도구 (NEW!)
 ├── 📖 README.md                 # 사용자 가이드
 ├── 📋 PROJECT_STRUCTURE.md      # 이 파일 (프로젝트 구조 설명)
+├── 🚀 QUICK_START.md            # 빠른 시작 가이드
 └── 📂 자동 생성 폴더들/
     ├── logs/                    # 로그 파일들
     │   ├── robot_system.log     # 시스템 로그
@@ -100,7 +103,38 @@ class RobotMovementError(RobotSystemError):
     # 로봇 이동 관련 예외
 ```
 
-### 🤖 robot_controller.py - 로봇 제어 (버그 수정됨)
+### 🛡️ dobot_api_handler.py - Dobot API 핸들러 (NEW!)
+**역할**: Dobot API 문제 해결 및 향상된 시뮬레이션 제공
+**주요 기능**:
+- 다양한 Dobot API 자동 감지
+- 향상된 더미 클래스 제공
+- API 설치 가이드 및 진단 도구
+- 연결 상태 모니터링
+
+**핵심 특징**:
+```python
+def check_dobot_api():
+    # 여러 API 옵션 자동 확인
+    # dobot_api, pydobot, DobotDllType 등
+
+class DobotApiDashboardDummy:
+    # 실제와 유사한 시뮬레이션 제공
+    # 로깅 및 딜레이 포함
+```
+
+### 🔍 diagnose_dobot.py - Dobot API 진단 도구 (NEW!)
+**역할**: Dobot API 설치 및 연결 문제 진단
+**주요 기능**:
+- Python 환경 확인
+- 사용 가능한 API 탐지
+- 시리얼 포트 스캔
+- 자동 설치 옵션
+- 하드웨어 연결 테스트
+
+**사용법**:
+```bash
+python diagnose_dobot.py
+```
 **역할**: Dobot 로봇 제어 핵심 로직
 **주요 수정사항**:
 - ✅ 타임아웃 데코레이터 오류 수정
@@ -242,11 +276,19 @@ class YOLODetector:
 1. **새로운 가구 타입**: `config.py`의 `FURNITURE_INFO`에 추가
 2. **새로운 로봇 동작**: `robot_controller.py`에 메서드 추가
 3. **새로운 UI 컴포넌트**: `ui_components.py`에 클래스 추가
+4. **새로운 Dobot API**: `dobot_api_handler.py`에 감지 로직 추가
 
 ### 🌐 시스템 통합 시
 1. **데이터베이스 연동**: 주문 로그를 DB로 확장
 2. **네트워크 통신**: 원격 제어 API 추가
 3. **클라우드 연동**: YOLO 모델 클라우드 추론
+4. **다중 로봇 지원**: 로봇 풀 관리 시스템 추가
+
+### 🔧 API 문제 해결 프로세스
+1. **진단**: `python diagnose_dobot.py` 실행
+2. **API 설치**: `pip install pydobot` 시도
+3. **하드웨어 확인**: USB/전원/드라이버 점검
+4. **시뮬레이션 테스트**: API 없이도 기능 검증
 
 ---
 
