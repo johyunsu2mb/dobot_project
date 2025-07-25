@@ -13,23 +13,49 @@
 - **안전한 로깅**: Windows 환경에서 한글/이모지 안전 처리
 - **버그 수정**: 타임아웃, NoneType 에러 등 주요 버그 해결
 
-## 📁 파일 구조
+### 🔧 버그 수정 사항
+
+1. **타임아웃 데코레이터 오류 수정**
+   - `timeout_handler` 구현 방식 개선
+   - 직접적인 스레드 기반 타임아웃 처리
+
+2. **None 객체 접근 오류 해결**
+   - `current_actual` 변수 None 체크 추가
+   - 배열 길이 검증 로직 추가
+
+3. **에러 모니터링 개선**
+   - 예외 처리 강화
+   - 안전한 로봇 상태 확인
+
+## 📁 파일 구조 (최신 업데이트)
 
 ```
-enhanced_dobot_system/
-├── main.py                 # 메인 애플리케이션
-├── config.py              # 설정 및 상수
-├── logger_setup.py        # 로깅 시스템
-├── utils.py               # 유틸리티 함수들
-├── robot_controller.py    # 로봇 제어 클래스
-├── yolo_detector.py       # YOLO 객체 인식
-├── ui_components.py       # UI 컴포넌트들
-├── requirements.txt       # 필요한 패키지 목록
-├── setup.py              # 설치 스크립트
-├── README.md             # 이 파일
-└── logs/                 # 로그 파일들 (자동 생성)
-    ├── robot_system.log
-    └── order_log.txt
+python_project_file/
+├── 📄 main.py                      # 메인 애플리케이션
+├── ⚙️ config.py                   # 시스템 설정 및 상수
+├── 📝 logger_setup.py             # 로깅 시스템 설정
+├── 🔧 utils.py                    # 유틸리티 함수 및 에러 클래스
+├── 🤖 robot_controller.py         # 로봇 제어 클래스 (버그 수정됨)
+├── 🛡️ dobot_api_handler.py        # **NEW!** Dobot API 핸들러
+├── 👁️ yolo_detector.py            # YOLO 객체 인식 시스템
+├── 🖼️ ui_components.py            # GUI 컴포넌트들
+├── 📦 requirements.txt            # 필요한 패키지 목록
+├── 🛠️ setup.py                    # 자동 설치 스크립트
+├── 🧪 test_system.py              # 시스템 테스트 스크립트
+├── 🔍 diagnose_dobot.py           # **NEW!** Dobot API 진단 도구
+├── 🧪 integration_test.py         # **NEW!** 통합 테스트
+├── 📋 run.bat                     # **NEW!** Windows 실행 스크립트
+├── 📋 run.sh                      # **NEW!** Linux/macOS 실행 스크립트
+├── 📖 README.md                   # 프로젝트 가이드 (이 파일)
+├── 📋 PROJECT_STRUCTURE.md        # 프로젝트 구조 상세 설명
+├── 🚀 QUICK_START.md              # 빠른 시작 가이드
+├── 🔧 TROUBLESHOOTING.md          # **NEW!** 트러블슈팅 가이드
+├── ✅ INSTALLATION_CHECKLIST.md   # **NEW!** 설치 체크리스트
+└── 📂 자동 생성 폴더들/
+    ├── logs/                      # 로그 파일들
+    ├── fonts/                     # 폰트 파일들 (선택사항)
+    ├── models/                    # YOLO 모델 캐시
+    └── data/                      # 데이터 파일들
 ```
 
 ## 🚀 설치 및 실행
@@ -115,6 +141,40 @@ z_min, z_max = -200, 200
 
 ## 🚨 문제 해결
 
+### 🤖 Dobot API 인식 문제 (NEW!)
+
+**문제**: "Dobot API를 찾을 수 없습니다" 메시지가 나타남
+
+**해결방법**:
+
+1. **진단 도구 실행**:
+   ```bash
+   python diagnose_dobot.py
+   ```
+
+2. **PyDobot 설치 (권장)**:
+   ```bash
+   pip install pydobot
+   ```
+
+3. **공식 Dobot API 설치**:
+   - [Dobot 공식 사이트](https://www.dobot.cc/downloadcenter.html)에서 Dobot Studio 다운로드
+   - Python API 라이브러리 추가 설치
+
+4. **대체 라이브러리**:
+   ```bash
+   pip install DobotDllType
+   # 또는
+   pip install pyserial
+   ```
+
+5. **하드웨어 확인**:
+   - USB 케이블로 Dobot 연결
+   - 전원 어댑터 연결 확인
+   - 장치 관리자에서 드라이버 설치 확인
+
+**💡 중요**: API가 없어도 시뮬레이션 모드로 모든 기능을 테스트할 수 있습니다!
+
 ### 자주 발생하는 문제들
 
 1. **"Movement timeout" 오류**
@@ -160,6 +220,17 @@ python main.py
 - **에러 처리**: 포괄적인 예외 처리 및 로깅
 - **타입 힌팅**: 함수 매개변수 및 반환값 타입 명시
 - **문서화**: 모든 클래스와 함수에 docstring 추가
+
+## 📝 업데이트 내역
+
+### v2.0.0 (2024-07-25)
+- 주요 버그 수정 (타임아웃, NoneType 에러)
+- 코드 모듈화 및 분할
+- 안전한 로깅 시스템 구현
+- 향상된 픽업 로직 적용
+
+### v1.0.0 (2024-07-24)
+- 초기 통합 버전 릴리스
 
 ---
 
