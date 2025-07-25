@@ -24,7 +24,8 @@ def install_requirements():
     """필수 패키지 설치"""
     print("\n📦 필수 패키지 설치 중...")
     
-    requirements = [
+    # 기본 필수 패키지
+    basic_requirements = [
         "numpy>=1.21.0",
         "matplotlib>=3.5.0", 
         "opencv-python>=4.5.0",
@@ -33,9 +34,16 @@ def install_requirements():
         "pyyaml>=6.0"
     ]
     
+    # Dobot 관련 패키지 (선택사항)
+    dobot_requirements = [
+        "pydobot",
+        "pyserial>=3.5"
+    ]
+    
     failed_packages = []
     
-    for package in requirements:
+    # 기본 패키지 설치
+    for package in basic_requirements:
         try:
             print(f"  설치 중: {package}")
             result = subprocess.run([
@@ -54,6 +62,32 @@ def install_requirements():
         except Exception as e:
             print(f"  ❌ {package} 설치 중 오류: {e}")
             failed_packages.append(package)
+    
+    # Dobot API 설치 (선택사항)
+    print("\n🤖 Dobot API 설치 (선택사항)")
+    print("실제 로봇 제어를 위해 권장되지만, 없어도 시뮬레이션 모드로 실행 가능")
+    
+    dobot_installed = False
+    for package in dobot_requirements:
+        try:
+            print(f"  시도 중: {package}")
+            result = subprocess.run([
+                sys.executable, "-m", "pip", "install", package
+            ], capture_output=True, text=True, timeout=180)
+            
+            if result.returncode == 0:
+                print(f"  ✅ {package} 설치 완료")
+                dobot_installed = True
+                break  # 하나라도 성공하면 중단
+            else:
+                print(f"  ⚠️ {package} 설치 실패 (계속 진행)")
+                
+        except Exception as e:
+            print(f"  ⚠️ {package} 설치 중 오류: {e} (계속 진행)")
+    
+    if not dobot_installed:
+        print("  ℹ️ Dobot API 설치 실패 - 시뮬레이션 모드로 실행됩니다")
+        print("  💡 나중에 'pip install pydobot'로 설치할 수 있습니다")
     
     return failed_packages
 
@@ -234,6 +268,11 @@ def main():
     print("  - README.md 파일을 참조하세요")
     print("  - logs/ 폴더에서 로그를 확인할 수 있습니다")
     print("  - 실제 Dobot 로봇 없이도 시뮬레이션 모드로 실행 가능합니다")
+    
+    # Dobot API 진단 안내
+    print("\n🤖 Dobot API 문제가 있는 경우:")
+    print("  python diagnose_dobot.py  # 진단 도구 실행")
+    print("  pip install pydobot       # 권장 API 설치")
 
 if __name__ == "__main__":
     main()
