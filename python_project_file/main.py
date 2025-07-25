@@ -366,8 +366,22 @@ class FurnitureOrderSystem:
         connection_frame = tk.Frame(header_frame, bg=UI_COLORS['secondary_bg'])
         connection_frame.pack(side=tk.RIGHT, padx=20, pady=20)
        
-        robot_status_text = "[GREEN] Robot Connected" if self.robot_controller.is_connected else "[RED] Simulation"
-        robot_status_color = UI_COLORS['success'] if self.robot_controller.is_connected else UI_COLORS['error']
+        # Dobot API 상태 확인
+        try:
+            from dobot_api_handler import DOBOT_API_AVAILABLE
+            dobot_api_status = DOBOT_API_AVAILABLE
+        except ImportError:
+            dobot_api_status = False
+       
+        if self.robot_controller.is_connected:
+            robot_status_text = "[GREEN] Robot Connected"
+            robot_status_color = UI_COLORS['success']
+        elif dobot_api_status:
+            robot_status_text = "[YELLOW] API Available (Not Connected)"
+            robot_status_color = UI_COLORS['warning']
+        else:
+            robot_status_text = "[RED] Simulation Mode"
+            robot_status_color = UI_COLORS['error']
        
         self.robot_connection_label = tk.Label(
             connection_frame,
@@ -840,6 +854,13 @@ class FurnitureOrderSystem:
         # 재연결 시도
         self.connect_robot()
        
+        # Dobot API 상태 확인
+        try:
+            from dobot_api_handler import DOBOT_API_AVAILABLE
+            dobot_api_status = DOBOT_API_AVAILABLE
+        except ImportError:
+            dobot_api_status = False
+       
         # 상태 업데이트
         if self.robot_controller.is_connected:
             self.robot_connection_label.config(
@@ -847,12 +868,18 @@ class FurnitureOrderSystem:
                 fg=UI_COLORS['success']
             )
             self.log_display.add_message("[CHECK] Robot reconnection successful!")
+        elif dobot_api_status:
+            self.robot_connection_label.config(
+                text="[YELLOW] API Available (Not Connected)",
+                fg=UI_COLORS['warning']
+            )
+            self.log_display.add_message("[WARNING] API available but connection failed, check robot power/cable")
         else:
             self.robot_connection_label.config(
-                text="[RED] Simulation",
+                text="[RED] Simulation Mode",
                 fg=UI_COLORS['error']
             )
-            self.log_display.add_message("[CROSS] Robot reconnection failed, maintaining simulation mode")
+            self.log_display.add_message("[INFO] No Dobot API found, running in simulation mode")
 
     def toggle_camera(self):
         """카메라 및 YOLO 켜기/끄기"""
@@ -988,16 +1015,39 @@ class FurnitureOrderSystem:
 
     def show_welcome_message(self):
         """환영 메시지 표시 (인코딩 안전성 향상)"""
+        # Dobot API 상태 확인
+        try:
+            from dobot_api_handler import DOBOT_API_AVAILABLE
+            dobot_api_status = DOBOT_API_AVAILABLE
+        except ImportError:
+            dobot_api_status = False
+        
         # 이모지를 텍스트로 대체한 안전한 메시지들
         messages = [
             "[PARTY] 향상된 Dobot 로봇 & YOLO 시스템이 시작되었습니다!",
-            "[ROBOT] 실제 Dobot 로봇이 연결되었습니다." if self.robot_controller.is_connected 
-            else "[WARNING] 로봇 연결 실패, 시뮬레이션 모드로 실행됩니다.",
-            "[TARGET] YOLOv8 객체 인식 시스템이 준비되었습니다." if DEPENDENCIES['YOLO_AVAILABLE'] 
-            else "[WARNING] YOLO 라이브러리가 없어 객체 인식이 비활성화됩니다.",
-            "[CLIPBOARD] 가구 버튼을 클릭하여 향상된 픽업 작업을 시작하세요.",
-            "[TARGET] 새로운 로직: 베이스에서 [350, 0, 물건Z좌표, 회전값]으로 이동"
         ]
+        
+        # 로봇 연결 상태에 따른 메시지
+        if self.robot_controller.is_connected:
+            messages.append("[ROBOT] 실제 Dobot 로봇이 연결되었습니다.")
+        elif dobot_api_status:
+            messages.append("[WARNING] Dobot API가 설치되어 있지만 로봇 연결에 실패했습니다.")
+            messages.append("[INFO] 로봇 전원, USB 케이블, 드라이버를 확인하세요.")
+        else:
+            messages.append("[INFO] Dobot API가 설치되지 않았습니다. 시뮬레이션 모드로 실행됩니다.")
+            messages.append("[TIP] 'pip install pydobot' 또는 Dobot Studio를 설치하면 실제 로봇을 제어할 수 있습니다.")
+        
+        # YOLO 상태 메시지
+        if DEPENDENCIES['YOLO_AVAILABLE']:
+            messages.append("[TARGET] YOLOv8 객체 인식 시스템이 준비되었습니다.")
+        else:
+            messages.append("[WARNING] YOLO 라이브러리가 없어 객체 인식이 비활성화됩니다.")
+        
+        messages.extend([
+            "[CLIPBOARD] 가구 버튼을 클릭하여 향상된 픽업 작업을 시작하세요.",
+            "[TARGET] 새로운 로직: 베이스에서 [350, 0, 물건Z좌표, 회전값]으로 이동",
+            "[GAMEPAD] 시뮬레이션 모드에서도 모든 기능을 테스트할 수 있습니다!"
+        ])
         
         for message in messages:
             self.log_display.add_message(message)
@@ -1034,11 +1084,18 @@ def main():
         # 로깅 초기화
         logger = system_logger
         
+        # Dobot API 상태 확인
+        try:
+            from dobot_api_handler import DOBOT_API_AVAILABLE, diagnose_dobot_setup
+            dobot_status = "Available" if DOBOT_API_AVAILABLE else "Unavailable (Simulation Mode)"
+        except ImportError:
+            dobot_status = "Handler Not Found (Basic Simulation)"
+        
         # 안전한 로깅 메시지들
         safe_messages = [
             "=== Enhanced Dobot Robot & YOLO System Started ===",
             "System initialization complete, GUI starting",
-            f"Dobot API Status: {'Available' if DEPENDENCIES['DOBOT_AVAILABLE'] else 'Unavailable'}",
+            f"Dobot API Status: {dobot_status}",
             f"YOLO Status: {'Available' if DEPENDENCIES['YOLO_AVAILABLE'] else 'Unavailable'}",
             "New pickup logic: Base -> [350, 0, Object_Z_coord, Rotation]"
         ]
@@ -1048,6 +1105,15 @@ def main():
                 logger.info(message)
             except:
                 print(f"Safe log: {message}")
+        
+        # Dobot API 진단 (필요시)
+        if not DOBOT_API_AVAILABLE:
+            print("\n" + "="*50)
+            print("🔍 Dobot API 설치가 필요한 경우 다음 명령어를 실행하세요:")
+            print("pip install pydobot")
+            print("또는")
+            print("python -c \"from dobot_api_handler import diagnose_dobot_setup; diagnose_dobot_setup()\"")
+            print("="*50 + "\n")
         
         root = tk.Tk()
         app = FurnitureOrderSystem(root)
