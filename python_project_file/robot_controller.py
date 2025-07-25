@@ -141,13 +141,14 @@ class RobotController:
             except:
                 print(f"Error during robot disconnection: {e}")
     
-    def move_to_position(self, position: List[float], validate_pos: bool = True) -> bool:
+    def move_to_position(self, position: List[float], validate_pos: bool = True, retry_count: int = 2) -> bool:
         """
-        안전한 위치 이동 (버그 수정됨)
+        안전한 위치 이동 (통신 안정성 강화)
         
         Args:
             position: 목표 위치 [x, y, z, r]
             validate_pos: 위치 유효성 검증 여부
+            retry_count: 재시도 횟수
             
         Returns:
             bool: 이동 성공 여부
@@ -159,66 +160,98 @@ class RobotController:
         if validate_pos and not validate_position(position, self.workspace):
             raise InvalidPositionError(f"Position out of workspace: {position}")
         
-        try:
-            if self.is_connected and self.move:
-                try:
-                    self.logger.info(f"Robot movement started: {position}")
-                except:
-                    print(f"Robot movement started: {position}")
-                
-                self.status = RobotStatus.MOVING
-                
-                # 수정된 타임아웃 처리 - 직접 구현
-                success = self._move_with_timeout(position, self.config.movement_timeout)
-                
-                if success:
-                    self.current_position = position.copy()
-                    self.status = RobotStatus.IDLE
-                    
+        # 재시도 로직 추가
+        for attempt in range(retry_count + 1):
+            try:
+                if self.is_connected and self.move:
                     try:
-                        self.logger.info(f"Robot movement completed: {position}")
+                        if attempt > 0:
+                            self.logger.warning(f"Robot movement retry {attempt}/{retry_count}: {position}")
+                        else:
+                            self.logger.info(f"Robot movement started: {position}")
                     except:
-                        print(f"Robot movement completed: {position}")
+                        print(f"🤖 로봇 이동 {'재시도' if attempt > 0 else '시작'}: {position}")
+                    
+                    self.status = RobotStatus.MOVING
+                    
+                    # 연결 상태 확인
+                    if not self._check_connection():
+                        self.logger.warning("Connection lost, attempting reconnection...")
+                        if not self._reconnect():
+                            raise RobotConnectionError("Failed to reconnect")
+                    
+                    # 수정된 타임아웃 처리 - 재시도마다 시간 증가
+                    timeout = self.config.movement_timeout * (1 + attempt * 0.5)
+                    success = self._move_with_timeout(position, timeout)
+                    
+                    if success:
+                        self.current_position = position.copy()
+                        self.status = RobotStatus.IDLE
+                        
+                        try:
+                            self.logger.info(f"Robot movement completed: {position}")
+                        except:
+                            print(f"✅ 로봇 이동 완료: {position}")
+                        return True
+                    else:
+                        if attempt < retry_count:
+                            self.logger.warning(f"Movement failed, retrying in 1 second...")
+                            time.sleep(1)
+                            continue
+                        else:
+                            self.status = RobotStatus.ERROR
+                            raise RobotMovementError(f"Movement timeout after {retry_count + 1} attempts: {position}")
+                else:
+                    # 시뮬레이션 모드 (API 없거나 연결 실패 시)
+                    try:
+                        self.logger.info(f"Simulation: Moving to position {position}")
+                    except:
+                        print(f"🎮 시뮬레이션: 위치 이동 {position}")
+                    
+                    # 시뮬레이션에서도 더미 객체가 있으면 호출
+                    if hasattr(self, 'move') and self.move:
+                        self.move.MovL(*position)
+                    else:
+                        time.sleep(0.5)  # 시뮬레이션 딜레이
+                        
+                    self.current_position = position.copy()
                     return True
+                    
+            except RobotConnectionError:
+                if attempt < retry_count:
+                    self.logger.warning("Connection error, attempting reconnection...")
+                    time.sleep(2)
+                    continue
+                else:
+                    raise
+            except Exception as e:
+                if attempt < retry_count:
+                    self.logger.warning(f"Movement error (attempt {attempt + 1}): {e}")
+                    time.sleep(1)
+                    continue
                 else:
                     self.status = RobotStatus.ERROR
-                    raise RobotMovementError(f"Movement timeout: {position}")
-            else:
-                # 시뮬레이션 모드 (API 없거나 연결 실패 시)
-                try:
-                    self.logger.info(f"Simulation: Moving to position {position}")
-                except:
-                    print(f"🎮 시뮬레이션: 위치 이동 {position}")
-                
-                # 시뮬레이션에서도 더미 객체가 있으면 호출
-                if hasattr(self, 'move') and self.move:
-                    self.move.MovL(*position)
-                else:
-                    time.sleep(0.5)  # 시뮬레이션 딜레이
-                    
-                self.current_position = position.copy()
-                return True
-                
-        except TimeoutError:
-            self.status = RobotStatus.ERROR
-            raise RobotMovementError(f"Movement timeout: {position}")
-        except Exception as e:
-            self.status = RobotStatus.ERROR
-            try:
-                self.logger.error(f"Robot movement error: {e}")
-            except:
-                print(f"Robot movement error: {e}")
-            raise RobotMovementError(f"Robot movement failed: {e}")
+                    try:
+                        self.logger.error(f"Robot movement failed after all retries: {e}")
+                    except:
+                        print(f"❌ 로봇 이동 실패: {e}")
+                    raise RobotMovementError(f"Robot movement failed: {e}")
+        
+        return False
     
     def _move_with_timeout(self, position: List[float], timeout: float) -> bool:
         """
-        타임아웃을 적용한 이동 함수 (버그 수정)
+        타임아웃을 적용한 이동 함수 (연결 안정성 강화)
         """
         result = [False]
         exception = [None]
         
         def move_target():
             try:
+                # 연결 상태 재확인
+                if not self._check_connection():
+                    raise RobotConnectionError("Connection lost during movement")
+                
                 self.move.MovL(*position)
                 if DOBOT_API_AVAILABLE and self.is_connected:
                     self._wait_arrive(position)
@@ -231,7 +264,8 @@ class RobotController:
         thread.join(timeout)
         
         if thread.is_alive():
-            # 타임아웃 발생
+            # 타임아웃 발생 시 연결 상태 확인
+            self.logger.warning(f"Movement timeout after {timeout}s, checking connection...")
             return False
         
         if exception[0]:
@@ -239,42 +273,105 @@ class RobotController:
         
         return result[0]
     
-    def control_gripper(self, activate: bool) -> bool:
+    def _check_connection(self) -> bool:
+        """연결 상태 확인"""
+        if not DOBOT_API_AVAILABLE:
+            return True  # 시뮬레이션 모드에서는 항상 연결된 것으로 간주
+        
+        try:
+            if self.dashboard and self.is_connected:
+                # 간단한 상태 확인 명령
+                error_id = self.dashboard.GetErrorID()
+                return True
+            return False
+        except Exception as e:
+            self.logger.warning(f"Connection check failed: {e}")
+            return False
+    
+    def _reconnect(self) -> bool:
+        """자동 재연결 시도"""
+        try:
+            self.logger.info("Attempting automatic reconnection...")
+            
+            # 기존 연결 정리
+            self.disconnect()
+            time.sleep(1)
+            
+            # 재연결 시도
+            success = self.connect()
+            if success:
+                self.logger.info("Automatic reconnection successful")
+            else:
+                self.logger.warning("Automatic reconnection failed")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"Reconnection failed: {e}")
+            return False
+    
+    def control_gripper(self, activate: bool, retry_count: int = 2) -> bool:
         """
-        그리퍼 제어 (안전한 로깅)
+        그리퍼 제어 (연결 안정성 강화)
         
         Args:
             activate: True for 활성화, False for 비활성화
+            retry_count: 재시도 횟수
             
         Returns:
             bool: 제어 성공 여부
         """
-        try:
-            action = "activated" if activate else "deactivated"
-            if self.is_connected and self.dashboard:
-                self.dashboard.DO(1, 1 if activate else 0)
-                try:
-                    self.logger.info(f"Gripper {action}")
-                except:
-                    print(f"🤏 그리퍼 {action}")
-            else:
-                # 시뮬레이션 모드 또는 연결 없음
-                if hasattr(self, 'dashboard') and self.dashboard:
-                    self.dashboard.DO(1, 1 if activate else 0)
-                try:
-                    self.logger.info(f"Simulation: Gripper {action}")
-                except:
-                    print(f"🎮 시뮬레이션: 그리퍼 {action}")
-            
-            time.sleep(self.config.gripper_delay)
-            return True
-            
-        except Exception as e:
+        for attempt in range(retry_count + 1):
             try:
-                self.logger.error(f"Gripper control error: {e}")
-            except:
-                print(f"Gripper control error: {e}")
-            raise GripperError(f"Gripper control failed: {e}")
+                action = "activated" if activate else "deactivated"
+                
+                if self.is_connected and self.dashboard:
+                    # 연결 상태 확인
+                    if not self._check_connection():
+                        self.logger.warning("Connection lost during gripper control, attempting reconnection...")
+                        if not self._reconnect():
+                            raise RobotConnectionError("Failed to reconnect for gripper control")
+                    
+                    self.dashboard.DO(1, 1 if activate else 0)
+                    try:
+                        if attempt > 0:
+                            self.logger.info(f"Gripper {action} (retry {attempt})")
+                        else:
+                            self.logger.info(f"Gripper {action}")
+                    except:
+                        print(f"🤏 그리퍼 {action}")
+                else:
+                    # 시뮬레이션 모드 또는 연결 없음
+                    if hasattr(self, 'dashboard') and self.dashboard:
+                        self.dashboard.DO(1, 1 if activate else 0)
+                    try:
+                        self.logger.info(f"Simulation: Gripper {action}")
+                    except:
+                        print(f"🎮 시뮬레이션: 그리퍼 {action}")
+                
+                time.sleep(self.config.gripper_delay)
+                return True
+                
+            except RobotConnectionError:
+                if attempt < retry_count:
+                    self.logger.warning("Gripper control connection error, retrying...")
+                    time.sleep(1)
+                    continue
+                else:
+                    raise
+            except Exception as e:
+                if attempt < retry_count:
+                    self.logger.warning(f"Gripper control error (attempt {attempt + 1}): {e}")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    try:
+                        self.logger.error(f"Gripper control error: {e}")
+                    except:
+                        print(f"❌ 그리퍼 제어 오류: {e}")
+                    raise GripperError(f"Gripper control failed: {e}")
+        
+        return False
     
     def _wait_arrive(self, target: List[float]):
         """목표 위치 도달 대기 (버그 수정)"""
