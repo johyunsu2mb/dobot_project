@@ -109,28 +109,32 @@ def check_dependencies():
         import cv2
         DEPENDENCIES['CV2_AVAILABLE'] = True
         DEPENDENCIES['YOLO_AVAILABLE'] = True
-        print("YOLOv8 및 OpenCV 사용 가능")
+        print("✅ YOLOv8 및 OpenCV 사용 가능")
     except ImportError as e:
         DEPENDENCIES['CV2_AVAILABLE'] = False
         DEPENDENCIES['YOLO_AVAILABLE'] = False
-        print(f"YOLO/OpenCV 임포트 실패: {e}")
+        print(f"⚠️ YOLO/OpenCV 임포트 실패: {e}")
 
     # PIL 체크
     try:
         from PIL import Image, ImageTk, ImageFont, ImageDraw
         DEPENDENCIES['PIL_AVAILABLE'] = True
+        print("✅ PIL 사용 가능")
     except ImportError:
-        print("PIL을 찾을 수 없습니다. 일부 이미지 기능이 비활성화됩니다.")
+        print("⚠️ PIL을 찾을 수 없습니다. 일부 이미지 기능이 비활성화됩니다.")
         DEPENDENCIES['PIL_AVAILABLE'] = False
 
-    # Dobot API 체크
+    # Dobot API 체크 (향상된 핸들러 사용)
     try:
-        from dobot_api import DobotApiDashboard, DobotApi, DobotApiMove, MyType, alarmAlarmJsonFile
-        DEPENDENCIES['DOBOT_AVAILABLE'] = True
-        print("Dobot API 사용 가능")
+        from dobot_api_handler import DOBOT_API_AVAILABLE
+        DEPENDENCIES['DOBOT_AVAILABLE'] = DOBOT_API_AVAILABLE
+        if DOBOT_API_AVAILABLE:
+            print("✅ Dobot API 사용 가능")
+        else:
+            print("⚠️ Dobot API 없음 - 시뮬레이션 모드로 실행됩니다.")
     except ImportError:
         DEPENDENCIES['DOBOT_AVAILABLE'] = False
-        print("Dobot API를 찾을 수 없습니다. 시뮬레이션 모드로 실행됩니다.")
+        print("⚠️ Dobot API 핸들러를 찾을 수 없습니다. 기본 시뮬레이션 모드로 실행됩니다.")
 
 # 초기화 시 의존성 체크 실행
 check_dependencies()
