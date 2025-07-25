@@ -135,7 +135,24 @@ python diagnose_dobot.py
 ✨ 시뮬레이션 모드는 API 없이도 정상 작동합니다!
 ```
 
-### 🧪 통합 테스트
+### ⚡ 연결 안정성 테스트 (NEW!)
+**통신 끊김 문제가 있는 경우:**
+```bash
+python test_connection_stability.py
+```
+
+**테스트 옵션:**
+- **빠른 테스트 (30초)**: 기본 연결 확인
+- **표준 테스트 (5분)**: 일반적인 안정성 검사  
+- **스트레스 테스트 (10분)**: 장시간 연결 안정성
+
+**예상 결과:**
+```
+📊 연결 안정성 테스트 결과
+✅ 성공한 이동: 45회 (90.0%)
+🔄 연결 복구: 2회
+🎉 우수: 연결이 매우 안정적입니다!
+```
 ```bash
 python integration_test.py
 ```
@@ -184,11 +201,12 @@ python integration_test.py
 | 전체 리셋 | 좌측 패널 리셋 버튼 | 시스템 완전 초기화 |
 | 로그 확인 | 우측 패널 하단 | 실시간 로그 모니터링 |
 
-### 🔍 새로운 진단 도구 (NEW!)
+### 🔧 새로운 진단 도구 (NEW!)
 | 도구 | 명령어 | 용도 |
 |------|--------|------|
 | API 진단 | `python diagnose_dobot.py` | Dobot API 설치/연결 문제 해결 |
 | 통합 테스트 | `python integration_test.py` | 전체 시스템 동작 확인 |
+| 연결 안정성 테스트 | `python test_connection_stability.py` | **NEW!** 통신 끊김 문제 진단 |
 | 실행 스크립트 | `run.bat` / `./run.sh` | 안전한 시스템 시작 |
 
 ## 🎯 향상된 픽업 로직 (NEW!)
@@ -231,9 +249,10 @@ python integration_test.py
 ### 🔧 문제 해결 순서
 1. **진단 도구**: `python diagnose_dobot.py`
 2. **통합 테스트**: `python integration_test.py`  
-3. **로그 확인**: `logs/robot_system.log` 파일 검토
-4. **재설치**: `python setup.py` 재실행
-5. **문서 참조**: `TROUBLESHOOTING.md` 확인
+3. **연결 안정성**: `python test_connection_stability.py` (통신 문제 시)
+4. **로그 확인**: `logs/robot_system.log` 파일 검토
+5. **재설치**: `python setup.py` 재실행
+6. **문서 참조**: `TROUBLESHOOTING.md` 확인
 
 ---
 
