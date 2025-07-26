@@ -1,318 +1,225 @@
-"""
-dobot_api_handler.py - Dobot API 핸들러 및 더미 구현
-Enhanced Dobot Robot & YOLO Object Detection System
-"""
-
-import logging
+# improved_dobot_api_handler.py
+import socket
 import time
 import threading
-import numpy as np
-from typing import Optional, List, Tuple
+import logging
+import atexit
+import signal
+import sys
+from contextlib import contextmanager
+from typing import Optional, Tuple, Dict, Any
 
-# 로거 설정
-logger = logging.getLogger('robot_system.dobot_api')
+logger = logging.getLogger(__name__)
 
-# Dobot API 가용성 체크
-DOBOT_API_AVAILABLE = False
-DobotApiDashboard = None
-DobotApiMove = None
-DobotApi = None
-MyType = None
-alarmAlarmJsonFile = None
-
-def check_dobot_api():
-    """Dobot API 가용성 확인"""
-    global DOBOT_API_AVAILABLE, DobotApiDashboard, DobotApiMove, DobotApi, MyType, alarmAlarmJsonFile
+class ImprovedDobotAPIHandler:
+    """개선된 Dobot API 핸들러 - 통신 안정성 문제 해결"""
     
-    try:
-        # 공식 Dobot API 시도
-        from dobot_api import DobotApiDashboard as _DobotApiDashboard
-        from dobot_api import DobotApiMove as _DobotApiMove
-        from dobot_api import DobotApi as _DobotApi
-        from dobot_api import MyType as _MyType
-        from dobot_api import alarmAlarmJsonFile as _alarmAlarmJsonFile
+    def __init__(self, ip_address: str = "192.168.1.6", 
+                 dashboard_port: int = 29999, 
+                 move_port: int = 30003,
+                 feed_port: int = 30004):
+        self.ip_address = ip_address
+        self.dashboard_port = dashboard_port
+        self.move_port = move_port
+        self.feed_port = feed_port
         
-        DobotApiDashboard = _DobotApiDashboard
-        DobotApiMove = _DobotApiMove
-        DobotApi = _DobotApi
-        MyType = _MyType
-        alarmAlarmJsonFile = _alarmAlarmJsonFile
+        # 소켓 연결 관리
+        self.dashboard_socket: Optional[socket.socket] = None
+        self.move_socket: Optional[socket.socket] = None
+        self.feed_socket: Optional[socket.socket] = None
         
-        DOBOT_API_AVAILABLE = True
-        logger.info("✅ Dobot API 공식 라이브러리 로드 성공")
-        return True
+        # 연결 상태 관리
+        self.is_connected = False
+        self.connection_lock = threading.Lock()
         
-    except ImportError:
+        # 자동 정리 등록
+        atexit.register(self.cleanup_all_connections)
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+    
+    def _signal_handler(self, signum, frame):
+        """프로그램 종료시 신호 처리"""
+        logger.info(f"신호 {signum} 받음. 연결 정리 중...")
+        self.cleanup_all_connections()
+        sys.exit(0)
+    
+    def _create_socket_with_options(self) -> socket.socket:
+        """소켓 생성 및 옵션 설정"""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        # 중요: 소켓 재사용 옵션 설정
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Windows에서 SO_REUSEPORT 지원하는 경우
         try:
-            # 대체 API 시도 (다른 패키지명)
-            import DobotDllType as dType
-            DOBOT_API_AVAILABLE = True
-            logger.info("✅ Dobot DLL Type 라이브러리 로드 성공")
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except (AttributeError, OSError):
+            pass  # Windows에서는 지원하지 않을 수 있음
+        
+        # 타임아웃 설정
+        sock.settimeout(10.0)
+        
+        # Keep-alive 설정
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        
+        return sock
+    
+    def _safe_socket_close(self, sock: Optional[socket.socket], name: str):
+        """안전한 소켓 종료"""
+        if sock is not None:
+            try:
+                # 우아한 종료 시도
+                sock.shutdown(socket.SHUT_RDWR)
+            except (OSError, socket.error) as e:
+                logger.debug(f"{name} 소켓 shutdown 실패: {e}")
+            
+            try:
+                sock.close()
+                logger.info(f"{name} 소켓 정상 종료")
+            except (OSError, socket.error) as e:
+                logger.warning(f"{name} 소켓 종료 중 오류: {e}")
+    
+    def cleanup_all_connections(self):
+        """모든 연결 정리"""
+        with self.connection_lock:
+            logger.info("모든 Dobot 연결 정리 시작...")
+            
+            # 각 소켓 정리
+            self._safe_socket_close(self.dashboard_socket, "Dashboard")
+            self._safe_socket_close(self.move_socket, "Move")
+            self._safe_socket_close(self.feed_socket, "Feed")
+            
+            # 소켓 참조 제거
+            self.dashboard_socket = None
+            self.move_socket = None
+            self.feed_socket = None
+            
+            self.is_connected = False
+            
+            # 소켓이 완전히 정리될 때까지 대기
+            time.sleep(0.5)
+            logger.info("모든 연결 정리 완료")
+    
+    def connect_with_retry(self, max_retries: int = 3, retry_delay: float = 2.0) -> bool:
+        """재시도 로직이 있는 연결"""
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Dobot 연결 시도 {attempt + 1}/{max_retries}")
+                
+                # 기존 연결이 있다면 정리
+                if self.is_connected:
+                    self.cleanup_all_connections()
+                    time.sleep(1.0)  # 정리 후 대기
+                
+                success = self._connect_all_sockets()
+                if success:
+                    self.is_connected = True
+                    logger.info("Dobot 연결 성공!")
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"연결 시도 {attempt + 1} 실패: {e}")
+                
+                # 실패한 연결 정리
+                self.cleanup_all_connections()
+                
+                if attempt < max_retries - 1:
+                    logger.info(f"{retry_delay}초 후 재시도...")
+                    time.sleep(retry_delay)
+        
+        logger.error("모든 연결 시도 실패")
+        return False
+    
+    def _connect_all_sockets(self) -> bool:
+        """모든 소켓 연결"""
+        try:
+            # Dashboard 소켓 연결
+            self.dashboard_socket = self._create_socket_with_options()
+            self.dashboard_socket.connect((self.ip_address, self.dashboard_port))
+            logger.info(f"Dashboard 연결 성공: {self.ip_address}:{self.dashboard_port}")
+            
+            # Move 소켓 연결
+            self.move_socket = self._create_socket_with_options()
+            self.move_socket.connect((self.ip_address, self.move_port))
+            logger.info(f"Move 연결 성공: {self.ip_address}:{self.move_port}")
+            
+            # Feed 소켓 연결 (선택적)
+            try:
+                self.feed_socket = self._create_socket_with_options()
+                self.feed_socket.connect((self.ip_address, self.feed_port))
+                logger.info(f"Feed 연결 성공: {self.ip_address}:{self.feed_port}")
+            except Exception as e:
+                logger.warning(f"Feed 소켓 연결 실패 (계속 진행): {e}")
+                self.feed_socket = None
+            
             return True
             
-        except ImportError:
-            logger.warning("⚠️ Dobot API를 찾을 수 없습니다. 시뮬레이션 모드로 실행됩니다.")
-            return False
-    except Exception as e:
-        logger.error(f"❌ Dobot API 로드 중 오류: {e}")
-        return False
-
-# 향상된 더미 클래스들 (API 없을 때 사용)
-class DobotApiDashboardDummy:
-    """향상된 Dobot Dashboard API 더미 클래스"""
-    
-    def __init__(self, ip: str, port: int):
-        self.ip = ip
-        self.port = port
-        self.is_enabled = False
-        self.error_id = "0"
-        self.logger = logging.getLogger('robot_system.dobot_dummy')
-        
-        self.logger.info(f"🤖 시뮬레이션 Dashboard 연결: {ip}:{port}")
-    
-    def EnableRobot(self):
-        """로봇 활성화 (시뮬레이션)"""
-        self.is_enabled = True
-        self.logger.info("🟢 로봇 활성화 (시뮬레이션)")
-        time.sleep(0.1)  # 실제와 유사한 딜레이
-        return True
-    
-    def DisableRobot(self):
-        """로봇 비활성화 (시뮬레이션)"""
-        self.is_enabled = False
-        self.logger.info("🔴 로봇 비활성화 (시뮬레이션)")
-        time.sleep(0.1)
-        return True
-    
-    def GetErrorID(self):
-        """에러 ID 반환 (시뮬레이션)"""
-        return self.error_id
-    
-    def ClearError(self):
-        """에러 클리어 (시뮬레이션)"""
-        self.error_id = "0"
-        self.logger.info("🧹 에러 클리어 (시뮬레이션)")
-        return True
-    
-    def Continue(self):
-        """동작 계속 (시뮬레이션)"""
-        self.logger.debug("▶️ 동작 계속 (시뮬레이션)")
-        return True
-    
-    def DO(self, idx: int, status: int):
-        """디지털 출력 제어 (시뮬레이션)"""
-        action = "ON" if status else "OFF"
-        self.logger.info(f"🔌 디지털 출력 {idx}: {action} (시뮬레이션)")
-        time.sleep(0.1)
-        return True
-
-class DobotApiMoveDummy:
-    """향상된 Dobot Move API 더미 클래스"""
-    
-    def __init__(self, ip: str, port: int):
-        self.ip = ip
-        self.port = port
-        self.current_position = [0.0, 0.0, 0.0, 0.0]
-        self.logger = logging.getLogger('robot_system.dobot_dummy')
-        
-        self.logger.info(f"🤖 시뮬레이션 Move 연결: {ip}:{port}")
-    
-    def MovL(self, x: float, y: float, z: float, r: float):
-        """직선 이동 (시뮬레이션)"""
-        target = [x, y, z, r]
-        self.logger.info(f"🎯 직선 이동: {target} (시뮬레이션)")
-        
-        # 실제와 유사한 이동 시뮬레이션
-        start_pos = self.current_position.copy()
-        steps = 10
-        
-        for i in range(steps + 1):
-            progress = i / steps
-            current = [
-                start_pos[j] + (target[j] - start_pos[j]) * progress
-                for j in range(4)
-            ]
-            self.current_position = current
-            time.sleep(0.05)  # 이동 시뮬레이션
-        
-        self.logger.info(f"✅ 이동 완료: {self.current_position}")
-        return True
-    
-    def MovJ(self, x: float, y: float, z: float, r: float):
-        """관절 이동 (시뮬레이션)"""
-        return self.MovL(x, y, z, r)  # 시뮬레이션에서는 동일하게 처리
-
-class DobotApiDummy:
-    """향상된 Dobot API 더미 클래스"""
-    
-    def __init__(self, ip: str, port: int):
-        self.ip = ip
-        self.port = port
-        self.socket_dobot = DummySocket()
-        self.logger = logging.getLogger('robot_system.dobot_dummy')
-        
-        self.logger.info(f"🤖 시뮬레이션 API 연결: {ip}:{port}")
-
-class DummySocket:
-    """더미 소켓 클래스"""
-    
-    def recv(self, size: int) -> bytes:
-        """더미 데이터 반환"""
-        # 실제 피드백과 유사한 더미 데이터 생성
-        dummy_data = np.zeros(size, dtype=np.uint8)
-        time.sleep(0.001)  # 실제 네트워크 딜레이 시뮬레이션
-        return dummy_data.tobytes()
-
-class MyTypeDummy:
-    """더미 MyType 클래스"""
-    pass
-
-def alarmAlarmJsonFileDummy():
-    """더미 알람 파일 함수"""
-    return [], []
-
-# API 초기화
-def initialize_dobot_api():
-    """Dobot API 초기화"""
-    global DobotApiDashboard, DobotApiMove, DobotApi, MyType, alarmAlarmJsonFile
-    
-    if not check_dobot_api():
-        # API가 없으면 더미 클래스 사용
-        DobotApiDashboard = DobotApiDashboardDummy
-        DobotApiMove = DobotApiMoveDummy
-        DobotApi = DobotApiDummy
-        MyType = MyTypeDummy
-        alarmAlarmJsonFile = alarmAlarmJsonFileDummy
-        
-        logger.info("🔄 더미 Dobot API 클래스로 초기화 완료")
-    
-    return DOBOT_API_AVAILABLE
-
-# Dobot API 설치 도구
-class DobotAPIInstaller:
-    """Dobot API 설치 도구"""
-    
-    @staticmethod
-    def get_installation_guide():
-        """설치 가이드 반환"""
-        guide = """
-🤖 Dobot API 설치 가이드
-
-1. 공식 Dobot 사이트에서 다운로드:
-   https://www.dobot.cc/downloadcenter.html
-   
-2. Python API 설치 방법들:
-   
-   방법 1: pip로 설치 (권장)
-   pip install pydobot
-   
-   방법 2: Dobot 공식 API
-   - Dobot Studio 설치
-   - Python API 라이브러리 별도 설치
-   
-   방법 3: 대체 라이브러리
-   pip install DobotDllType
-   
-3. 설치 확인:
-   python -c "import dobot_api; print('Dobot API 설치 성공')"
-   
-4. 연결 확인:
-   - USB 케이블로 Dobot 연결
-   - 드라이버 설치 확인
-   - 포트 번호 확인 (일반적으로 COM3, COM4 등)
-
-⚠️ 참고: API 없이도 시뮬레이션 모드로 모든 기능 테스트 가능
-"""
-        return guide
-    
-    @staticmethod
-    def check_dobot_connection():
-        """Dobot 연결 상태 확인"""
-        try:
-            if DOBOT_API_AVAILABLE:
-                # 실제 API로 연결 테스트
-                dashboard = DobotApiDashboard("192.168.1.6", 29999)
-                dashboard.EnableRobot()
-                dashboard.DisableRobot()
-                return True, "✅ 실제 Dobot 연결 성공"
-            else:
-                return False, "⚠️ Dobot API 없음 - 시뮬레이션 모드"
         except Exception as e:
-            return False, f"❌ 연결 실패: {str(e)}"
+            logger.error(f"소켓 연결 실패: {e}")
+            self.cleanup_all_connections()
+            return False
     
-    @staticmethod
-    def install_recommendations():
-        """설치 권장사항 반환"""
-        recommendations = [
-            "1. 가장 쉬운 방법: pip install pydobot",
-            "2. Dobot Studio와 함께 설치하는 방법 권장",
-            "3. USB 드라이버 설치 필수",
-            "4. 방화벽에서 Dobot Studio 허용",
-            "5. 시뮬레이션 모드로 먼저 테스트 후 실제 연결"
-        ]
-        return recommendations
-
-# 진단 도구
-def diagnose_dobot_setup():
-    """Dobot 설정 진단"""
-    print("🔍 Dobot API 설정 진단 중...")
-    print("=" * 50)
+    @contextmanager
+    def connection_context(self):
+        """Context manager로 연결 관리"""
+        try:
+            if not self.connect_with_retry():
+                raise ConnectionError("Dobot 연결 실패")
+            yield self
+        finally:
+            self.cleanup_all_connections()
     
-    # 1. Python 환경 확인
-    import sys
-    print(f"Python 버전: {sys.version}")
+    def send_command(self, command: str, socket_type: str = "dashboard") -> Optional[str]:
+        """안전한 명령 전송"""
+        with self.connection_lock:
+            if not self.is_connected:
+                logger.error("로봇이 연결되지 않음")
+                return None
+            
+            # 소켓 선택
+            sock = None
+            if socket_type == "dashboard":
+                sock = self.dashboard_socket
+            elif socket_type == "move":
+                sock = self.move_socket
+            elif socket_type == "feed":
+                sock = self.feed_socket
+            
+            if sock is None:
+                logger.error(f"{socket_type} 소켓이 없음")
+                return None
+            
+            try:
+                # 명령 전송
+                sock.send(command.encode('utf-8'))
+                
+                # 응답 수신
+                response = sock.recv(1024).decode('utf-8').strip()
+                logger.debug(f"명령: {command} | 응답: {response}")
+                return response
+                
+            except socket.timeout:
+                logger.error(f"명령 타임아웃: {command}")
+                return None
+            except (socket.error, ConnectionError) as e:
+                logger.error(f"명령 전송 실패: {command}, 오류: {e}")
+                self.is_connected = False
+                return None
     
-    # 2. API 가용성 확인
-    api_available = check_dobot_api()
-    print(f"Dobot API 가용성: {'✅ 사용가능' if api_available else '❌ 사용불가'}")
+    def check_connection_health(self) -> bool:
+        """연결 상태 확인"""
+        try:
+            response = self.send_command("GetPose()", "dashboard")
+            return response is not None and "ERROR" not in response.upper()
+        except:
+            return False
     
-    # 3. 대체 라이브러리 확인
-    alternatives = []
-    try:
-        import pydobot
-        alternatives.append("pydobot")
-    except ImportError:
-        pass
+    def __enter__(self):
+        """Context manager 진입"""
+        if not self.connect_with_retry():
+            raise ConnectionError("Dobot 연결 실패")
+        return self
     
-    try:
-        import DobotDllType
-        alternatives.append("DobotDllType")
-    except ImportError:
-        pass
-    
-    if alternatives:
-        print(f"사용 가능한 대체 라이브러리: {', '.join(alternatives)}")
-    else:
-        print("사용 가능한 Dobot 라이브러리 없음")
-    
-    # 4. 연결 테스트
-    if api_available:
-        success, message = DobotAPIInstaller.check_dobot_connection()
-        print(f"연결 테스트: {message}")
-    
-    # 5. 권장사항 출력
-    print("\n📋 권장사항:")
-    for rec in DobotAPIInstaller.install_recommendations():
-        print(f"  {rec}")
-    
-    # 6. 설치 가이드
-    if not api_available:
-        print("\n" + DobotAPIInstaller.get_installation_guide())
-    
-    print("=" * 50)
-    print("✨ 시뮬레이션 모드는 API 없이도 정상 작동합니다!")
-
-# 모듈 초기화
-initialize_dobot_api()
-
-# 외부에서 사용할 수 있도록 export
-__all__ = [
-    'DOBOT_API_AVAILABLE',
-    'DobotApiDashboard', 
-    'DobotApiMove', 
-    'DobotApi', 
-    'MyType', 
-    'alarmAlarmJsonFile',
-    'diagnose_dobot_setup',
-    'DobotAPIInstaller'
-]
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager 종료"""
+        self.cleanup_all_connections()
