@@ -1,225 +1,331 @@
-# improved_dobot_api_handler.py
-import socket
-import time
-import threading
-import logging
+"""
+robot_controller.py 수정사항
+
+기존 robot_controller.py 파일에서 다음 부분들을 수정하거나 추가하세요.
+전체 파일을 교체하지 말고, 기존 코드에서 해당 부분만 수정하면 됩니다.
+
+주요 수정사항:
+- 자동 리소스 정리 등록
+- 안전한 연결/해제 로직
+- 에러 처리 강화
+- 시뮬레이션 모드 지원
+"""
+
+# ========== 파일 상단에 추가할 import들 ==========
 import atexit
 import signal
 import sys
-from contextlib import contextmanager
-from typing import Optional, Tuple, Dict, Any
+import time
+import logging
+from typing import Optional
+from dobot_api_handler import DobotAPIHandler  # 개선된 API 핸들러
 
 logger = logging.getLogger(__name__)
 
-class ImprovedDobotAPIHandler:
-    """개선된 Dobot API 핸들러 - 통신 안정성 문제 해결"""
-    
-    def __init__(self, ip_address: str = "192.168.1.6", 
-                 dashboard_port: int = 29999, 
-                 move_port: int = 30003,
-                 feed_port: int = 30004):
+# ========== RobotController 클래스 수정사항 ==========
+
+class RobotController:
+    def __init__(self, ip_address: str = "192.168.1.6"):
+        """
+        기존 __init__ 함수에 다음 줄들을 추가하세요
+        """
         self.ip_address = ip_address
-        self.dashboard_port = dashboard_port
-        self.move_port = move_port
-        self.feed_port = feed_port
+        self.dobot_api: Optional[DobotAPIHandler] = None
+        self.is_simulation_mode = False
         
-        # 소켓 연결 관리
-        self.dashboard_socket: Optional[socket.socket] = None
-        self.move_socket: Optional[socket.socket] = None
-        self.feed_socket: Optional[socket.socket] = None
+        # 🔥 자동 정리 등록 (중요!) - 이 줄을 추가
+        atexit.register(self.emergency_cleanup)
         
-        # 연결 상태 관리
-        self.is_connected = False
-        self.connection_lock = threading.Lock()
-        
-        # 자동 정리 등록
-        atexit.register(self.cleanup_all_connections)
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        logger.info(f"RobotController 초기화: {ip_address}")
     
-    def _signal_handler(self, signum, frame):
-        """프로그램 종료시 신호 처리"""
-        logger.info(f"신호 {signum} 받음. 연결 정리 중...")
-        self.cleanup_all_connections()
-        sys.exit(0)
-    
-    def _create_socket_with_options(self) -> socket.socket:
-        """소켓 생성 및 옵션 설정"""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
-        # 중요: 소켓 재사용 옵션 설정
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        # Windows에서 SO_REUSEPORT 지원하는 경우
+    def emergency_cleanup(self):
+        """
+        새로 추가할 함수 - 비상시 리소스 정리
+        """
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except (AttributeError, OSError):
-            pass  # Windows에서는 지원하지 않을 수 있음
-        
-        # 타임아웃 설정
-        sock.settimeout(10.0)
-        
-        # Keep-alive 설정
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        
-        return sock
+            if self.dobot_api:
+                logger.info("비상 정리 실행...")
+                self.dobot_api.cleanup_all_connections()
+        except Exception as e:
+            logger.error(f"비상 정리 중 오류: {e}")
     
-    def _safe_socket_close(self, sock: Optional[socket.socket], name: str):
-        """안전한 소켓 종료"""
-        if sock is not None:
-            try:
-                # 우아한 종료 시도
-                sock.shutdown(socket.SHUT_RDWR)
-            except (OSError, socket.error) as e:
-                logger.debug(f"{name} 소켓 shutdown 실패: {e}")
-            
-            try:
-                sock.close()
-                logger.info(f"{name} 소켓 정상 종료")
-            except (OSError, socket.error) as e:
-                logger.warning(f"{name} 소켓 종료 중 오류: {e}")
-    
-    def cleanup_all_connections(self):
-        """모든 연결 정리"""
-        with self.connection_lock:
-            logger.info("모든 Dobot 연결 정리 시작...")
-            
-            # 각 소켓 정리
-            self._safe_socket_close(self.dashboard_socket, "Dashboard")
-            self._safe_socket_close(self.move_socket, "Move")
-            self._safe_socket_close(self.feed_socket, "Feed")
-            
-            # 소켓 참조 제거
-            self.dashboard_socket = None
-            self.move_socket = None
-            self.feed_socket = None
-            
-            self.is_connected = False
-            
-            # 소켓이 완전히 정리될 때까지 대기
-            time.sleep(0.5)
-            logger.info("모든 연결 정리 완료")
-    
-    def connect_with_retry(self, max_retries: int = 3, retry_delay: float = 2.0) -> bool:
-        """재시도 로직이 있는 연결"""
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Dobot 연결 시도 {attempt + 1}/{max_retries}")
-                
-                # 기존 연결이 있다면 정리
-                if self.is_connected:
-                    self.cleanup_all_connections()
-                    time.sleep(1.0)  # 정리 후 대기
-                
-                success = self._connect_all_sockets()
-                if success:
-                    self.is_connected = True
-                    logger.info("Dobot 연결 성공!")
-                    return True
-                    
-            except Exception as e:
-                logger.warning(f"연결 시도 {attempt + 1} 실패: {e}")
-                
-                # 실패한 연결 정리
-                self.cleanup_all_connections()
-                
-                if attempt < max_retries - 1:
-                    logger.info(f"{retry_delay}초 후 재시도...")
-                    time.sleep(retry_delay)
-        
-        logger.error("모든 연결 시도 실패")
-        return False
-    
-    def _connect_all_sockets(self) -> bool:
-        """모든 소켓 연결"""
+    def connect(self) -> bool:
+        """
+        기존 connect 함수를 이 코드로 교체하세요
+        """
         try:
-            # Dashboard 소켓 연결
-            self.dashboard_socket = self._create_socket_with_options()
-            self.dashboard_socket.connect((self.ip_address, self.dashboard_port))
-            logger.info(f"Dashboard 연결 성공: {self.ip_address}:{self.dashboard_port}")
+            logger.info("로봇 연결 시작...")
             
-            # Move 소켓 연결
-            self.move_socket = self._create_socket_with_options()
-            self.move_socket.connect((self.ip_address, self.move_port))
-            logger.info(f"Move 연결 성공: {self.ip_address}:{self.move_port}")
+            # 🔥 기존 연결이 있으면 완전히 정리 (중요!)
+            if self.dobot_api:
+                logger.info("기존 연결 정리 중...")
+                self.dobot_api.cleanup_all_connections()
+                time.sleep(1.0)
             
-            # Feed 소켓 연결 (선택적)
-            try:
-                self.feed_socket = self._create_socket_with_options()
-                self.feed_socket.connect((self.ip_address, self.feed_port))
-                logger.info(f"Feed 연결 성공: {self.ip_address}:{self.feed_port}")
-            except Exception as e:
-                logger.warning(f"Feed 소켓 연결 실패 (계속 진행): {e}")
-                self.feed_socket = None
+            # 새 연결 생성
+            self.dobot_api = DobotAPIHandler(self.ip_address)
             
-            return True
+            if self.dobot_api.connect_with_retry():
+                self.is_simulation_mode = False
+                logger.info("✅ 실제 로봇 연결 성공")
+                return True
+            else:
+                logger.warning("⚠️ 실제 로봇 연결 실패, 시뮬레이션 모드로 전환")
+                self.is_simulation_mode = True
+                return True
+                
+        except Exception as e:
+            logger.error(f"로봇 연결 중 오류: {e}")
+            self.is_simulation_mode = True
+            return True  # 시뮬레이션 모드로라도 계속 진행
+    
+    def disconnect(self):
+        """
+        기존 disconnect 함수를 이 코드로 교체하세요
+        """
+        try:
+            if self.dobot_api:
+                logger.info("로봇 연결 해제 시작...")
+                self.dobot_api.cleanup_all_connections()
+                self.dobot_api = None
+            
+            self.is_simulation_mode = False
+            logger.info("✅ 로봇 연결 해제 완료")
             
         except Exception as e:
-            logger.error(f"소켓 연결 실패: {e}")
-            self.cleanup_all_connections()
+            logger.error(f"연결 해제 중 오류: {e}")
+    
+    def move_to(self, x: float, y: float, z: float, r: float = 0.0, 
+                wait_for_completion: bool = True) -> bool:
+        """
+        기존 move_to 함수를 이 코드로 교체하거나 수정하세요
+        """
+        # 시뮬레이션 모드 처리
+        if self.is_simulation_mode:
+            logger.info(f"[시뮬레이션] 이동: ({x}, {y}, {z}, {r})")
+            time.sleep(0.5)  # 시뮬레이션 딜레이
+            return True
+        
+        # 연결 상태 확인
+        if not self.dobot_api or not self.dobot_api.is_connected:
+            logger.error("로봇이 연결되지 않음")
+            return False
+        
+        try:
+            # 좌표 검증 (선택적)
+            if not self._validate_coordinates(x, y, z, r):
+                logger.error(f"유효하지 않은 좌표: ({x}, {y}, {z}, {r})")
+                return False
+            
+            # 이동 명령 전송
+            command = f"MovJ({x},{y},{z},{r})"
+            response = self.dobot_api.send_command(command, "move")
+            
+            if response and "OK" in response.upper():
+                logger.info(f"✅ 이동 완료: ({x}, {y}, {z}, {r})")
+                return True
+            else:
+                logger.error(f"❌ 이동 실패: {response}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"이동 명령 실패: {e}")
             return False
     
-    @contextmanager
-    def connection_context(self):
-        """Context manager로 연결 관리"""
-        try:
-            if not self.connect_with_retry():
-                raise ConnectionError("Dobot 연결 실패")
-            yield self
-        finally:
-            self.cleanup_all_connections()
-    
-    def send_command(self, command: str, socket_type: str = "dashboard") -> Optional[str]:
-        """안전한 명령 전송"""
-        with self.connection_lock:
-            if not self.is_connected:
-                logger.error("로봇이 연결되지 않음")
-                return None
-            
-            # 소켓 선택
-            sock = None
-            if socket_type == "dashboard":
-                sock = self.dashboard_socket
-            elif socket_type == "move":
-                sock = self.move_socket
-            elif socket_type == "feed":
-                sock = self.feed_socket
-            
-            if sock is None:
-                logger.error(f"{socket_type} 소켓이 없음")
-                return None
-            
-            try:
-                # 명령 전송
-                sock.send(command.encode('utf-8'))
-                
-                # 응답 수신
-                response = sock.recv(1024).decode('utf-8').strip()
-                logger.debug(f"명령: {command} | 응답: {response}")
-                return response
-                
-            except socket.timeout:
-                logger.error(f"명령 타임아웃: {command}")
-                return None
-            except (socket.error, ConnectionError) as e:
-                logger.error(f"명령 전송 실패: {command}, 오류: {e}")
-                self.is_connected = False
-                return None
-    
-    def check_connection_health(self) -> bool:
-        """연결 상태 확인"""
-        try:
-            response = self.send_command("GetPose()", "dashboard")
-            return response is not None and "ERROR" not in response.upper()
-        except:
+    def _validate_coordinates(self, x: float, y: float, z: float, r: float) -> bool:
+        """
+        새로 추가할 함수 - 좌표 유효성 검사
+        """
+        # 작업 공간 제한 (config.py에서 가져오거나 여기서 정의)
+        x_min, x_max = -400, 400
+        y_min, y_max = -400, 400
+        z_min, z_max = -200, 200
+        
+        if not (x_min <= x <= x_max):
             return False
+        if not (y_min <= y <= y_max):
+            return False
+        if not (z_min <= z <= z_max):
+            return False
+        
+        return True
+    
+    def gripper_control(self, enable: bool, wait_time: float = 1.5) -> bool:
+        """
+        그리퍼 제어 함수 - 기존 함수가 있다면 수정, 없다면 추가
+        """
+        if self.is_simulation_mode:
+            logger.info(f"[시뮬레이션] 그리퍼: {'ON' if enable else 'OFF'}")
+            time.sleep(wait_time)
+            return True
+        
+        if not self.dobot_api or not self.dobot_api.is_connected:
+            logger.error("로봇이 연결되지 않음")
+            return False
+        
+        try:
+            # 그리퍼 명령 전송
+            command = f"DO(1,{1 if enable else 0})"
+            response = self.dobot_api.send_command(command, "dashboard")
+            
+            if response and "OK" in response.upper():
+                time.sleep(wait_time)  # 그리퍼 동작 대기
+                logger.info(f"✅ 그리퍼 {'ON' if enable else 'OFF'} 완료")
+                return True
+            else:
+                logger.error(f"❌ 그리퍼 제어 실패: {response}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"그리퍼 제어 실패: {e}")
+            return False
+    
+    def get_current_pose(self) -> Optional[Tuple[float, float, float, float]]:
+        """
+        현재 위치 조회 함수 - 새로 추가하거나 기존 함수 수정
+        """
+        if self.is_simulation_mode:
+            # 시뮬레이션에서는 기본 위치 반환
+            return (200.0, 0.0, 100.0, 0.0)
+        
+        if not self.dobot_api or not self.dobot_api.is_connected:
+            logger.error("로봇이 연결되지 않음")
+            return None
+        
+        try:
+            command = "GetPose()"
+            response = self.dobot_api.send_command(command, "dashboard")
+            
+            if response and "OK" in response.upper():
+                # 응답 파싱 (실제 응답 형식에 맞게 수정 필요)
+                # 예: "OK,{200.0,0.0,100.0,0.0}"
+                pose_data = response.split(',')[1:]  # OK 부분 제거
+                if len(pose_data) >= 4:
+                    x = float(pose_data[0].strip('{}'))
+                    y = float(pose_data[1])
+                    z = float(pose_data[2])
+                    r = float(pose_data[3].strip('{}'))
+                    return (x, y, z, r)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"위치 조회 실패: {e}")
+            return None
+    
+    def home_robot(self) -> bool:
+        """
+        로봇 홈 위치로 이동 - 새로 추가하거나 기존 함수 수정
+        """
+        logger.info("로봇을 홈 위치로 이동 중...")
+        
+        if self.is_simulation_mode:
+            logger.info("[시뮬레이션] 홈 위치로 이동 완료")
+            time.sleep(2.0)
+            return True
+        
+        if not self.dobot_api or not self.dobot_api.is_connected:
+            logger.error("로봇이 연결되지 않음")
+            return False
+        
+        try:
+            # 홈 명령 전송
+            command = "EnableRobot()"
+            response1 = self.dobot_api.send_command(command, "dashboard")
+            
+            command = "Home()"
+            response2 = self.dobot_api.send_command(command, "dashboard")
+            
+            if response1 and response2:
+                logger.info("✅ 홈 위치로 이동 완료")
+                return True
+            else:
+                logger.error("❌ 홈 이동 실패")
+                return False
+                
+        except Exception as e:
+            logger.error(f"홈 이동 실패: {e}")
+            return False
+    
+    def is_robot_connected(self) -> bool:
+        """
+        연결 상태 확인 함수 - 새로 추가
+        """
+        if self.is_simulation_mode:
+            return True
+        
+        if not self.dobot_api:
+            return False
+        
+        return self.dobot_api.is_connected and self.dobot_api.check_connection_health()
+    
+    # ========== Context Manager 지원 (권장) ==========
     
     def __enter__(self):
         """Context manager 진입"""
-        if not self.connect_with_retry():
-            raise ConnectionError("Dobot 연결 실패")
-        return self
+        if self.connect():
+            return self
+        else:
+            raise ConnectionError("로봇 연결 실패")
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager 종료"""
-        self.cleanup_all_connections()
+        self.disconnect()
+
+
+# ========== 사용 예제 ==========
+
+def example_usage():
+    """
+    개선된 로봇 컨트롤러 사용 예제
+    """
+    
+    # 방법 1: Context Manager 사용 (권장)
+    try:
+        with RobotController() as robot:
+            # 로봇 작업 수행
+            robot.home_robot()
+            robot.move_to(200, 0, 100)
+            robot.gripper_control(True)
+            robot.move_to(300, 100, 150)
+            robot.gripper_control(False)
+            # with 블록을 벗어나면 자동으로 연결 해제
+            
+    except Exception as e:
+        logger.error(f"로봇 작업 중 오류: {e}")
+    
+    # 방법 2: 수동 관리
+    robot = RobotController()
+    try:
+        if robot.connect():
+            robot.move_to(200, 0, 100)
+            robot.move_to(300, 100, 150)
+    finally:
+        robot.disconnect()  # 반드시 호출!
+
+
+# ========== 기존 코드에 추가할 헬퍼 함수들 ==========
+
+def safe_robot_operation(robot: RobotController, operation_func, *args, **kwargs):
+    """
+    안전한 로봇 동작 실행 헬퍼
+    """
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if not robot.is_robot_connected():
+                logger.warning("로봇 연결 끊어짐. 재연결 시도...")
+                if not robot.connect():
+                    continue
+            
+            result = operation_func(*args, **kwargs)
+            if result:
+                return True
+                
+        except Exception as e:
+            logger.error(f"동작 실행 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+            
+        if attempt < max_retries - 1:
+            time.sleep(1.0)
+    
+    return False
