@@ -276,12 +276,12 @@ class ErrorCodes:
         return cls.ERROR_MESSAGES.get(error_code, cls.ERROR_MESSAGES[cls.UNKNOWN_ERROR])
 
 
-# === 개발자 설정 ===
-DEBUG_MODE = False
-VERBOSE_LOGGING = False
-ENABLE_PROFILING = False
-
 # === 버전 정보 ===
 VERSION = "2.0.0"
 BUILD_DATE = "2024-01-01"
 AUTHOR = "Dobot Controller Team"
+
+# === 개발자 설정 ===
+DEBUG_MODE = False
+VERBOSE_LOGGING = False
+ENABLE_PROFILING = False
