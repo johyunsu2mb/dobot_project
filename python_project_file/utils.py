@@ -1,718 +1,470 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-utils.py - 개선된 유틸리티 함수들
-
-주요 개선사항:
-- 안전한 에러 처리 클래스들
-- 좌표 변환 유틸리티
-- 연결 상태 모니터링
-- 성능 측정 도구
-- 파일 및 경로 관리
+유틸리티 함수 및 헬퍼 클래스
+좌표 관리, 에러 처리, 공통 기능 제공
 """
 
-import os
-import sys
 import time
-import json
-import yaml
-import logging
+import math
 import threading
-import queue
-import functools
 import traceback
-from typing import Any, Dict, List, Optional, Tuple, Callable, Union
-from pathlib import Path
+from typing import List, Tuple, Optional, Dict, Any, Callable
 from dataclasses import dataclass
-from contextlib import contextmanager
-import socket
+from enum import Enum
+import logging
+from tkinter import messagebox
 
-# psutil 선택적 import
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
+from config import AppConfig, ErrorCodes
 
-logger = logging.getLogger(__name__)
 
-# ========== 에러 클래스들 ==========
-
-class DobotError(Exception):
-    """Dobot 관련 기본 에러 클래스"""
-    pass
-
-class DobotConnectionError(DobotError):
-    """연결 관련 에러"""
-    def __init__(self, message: str, retry_possible: bool = True):
-        super().__init__(message)
-        self.retry_possible = retry_possible
-
-class DobotTimeoutError(DobotError):
-    """타임아웃 에러"""
-    def __init__(self, message: str, timeout_duration: float):
-        super().__init__(message)
-        self.timeout_duration = timeout_duration
-
-class DobotMovementError(DobotError):
-    """움직임 관련 에러"""
-    def __init__(self, message: str, position: Optional[Tuple[float, float, float, float]] = None):
-        super().__init__(message)
-        self.position = position
-
-class DobotWorkspaceError(DobotError):
-    """작업공간 제한 에러"""
-    def __init__(self, message: str, coordinate: Tuple[float, float, float, float]):
-        super().__init__(message)
-        self.coordinate = coordinate
-
-# ========== 데코레이터들 ==========
-
-def retry_on_failure(max_retries: int = 3, delay: float = 1.0, 
-                    exceptions: Tuple = (Exception,)):
-    """
-    실패시 재시도하는 데코레이터
-    
-    Args:
-        max_retries: 최대 재시도 횟수
-        delay: 재시도 간 대기 시간
-        exceptions: 재시도할 예외 타입들
-    """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            
-            for attempt in range(max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-                    if attempt < max_retries:
-                        logger.warning(f"{func.__name__} 실패 (시도 {attempt + 1}/{max_retries + 1}): {e}")
-                        time.sleep(delay)
-                    else:
-                        logger.error(f"{func.__name__} 모든 재시도 실패: {e}")
-            
-            raise last_exception
-        return wrapper
-    return decorator
-
-def timeout_handler(timeout_seconds: float):
-    """
-    타임아웃 처리 데코레이터
-    """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            result = [None]
-            exception = [None]
-            
-            def target():
-                try:
-                    result[0] = func(*args, **kwargs)
-                except Exception as e:
-                    exception[0] = e
-            
-            thread = threading.Thread(target=target)
-            thread.daemon = True
-            thread.start()
-            thread.join(timeout_seconds)
-            
-            if thread.is_alive():
-                # 타임아웃 발생
-                raise DobotTimeoutError(f"{func.__name__} 타임아웃 ({timeout_seconds}초)", timeout_seconds)
-            
-            if exception[0]:
-                raise exception[0]
-            
-            return result[0]
-        return wrapper
-    return decorator
-
-def log_execution_time(func):
-    """
-    함수 실행 시간을 로깅하는 데코레이터
-    """
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        try:
-            result = func(*args, **kwargs)
-            execution_time = time.time() - start_time
-            logger.debug(f"{func.__name__} 실행 시간: {execution_time:.3f}초")
-            return result
-        except Exception as e:
-            execution_time = time.time() - start_time
-            logger.debug(f"{func.__name__} 실행 시간 (실패): {execution_time:.3f}초")
-            raise
-    return wrapper
-
-def safe_execution(default_return=None, log_error=True):
-    """
-    안전한 실행을 위한 데코레이터 - 예외 발생시 기본값 반환
-    """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                if log_error:
-                    logger.error(f"{func.__name__} 실행 중 오류: {e}")
-                return default_return
-        return wrapper
-    return decorator
-
-# ========== 좌표 및 계산 유틸리티 ==========
-
-@dataclass
-class Position:
-    """위치 정보 클래스"""
-    x: float
-    y: float
-    z: float
-    r: float = 0.0
-    
-    def __iter__(self):
-        return iter((self.x, self.y, self.z, self.r))
-    
-    def to_tuple(self) -> Tuple[float, float, float, float]:
-        return (self.x, self.y, self.z, self.r)
-    
-    def to_dict(self) -> Dict[str, float]:
-        return {"x": self.x, "y": self.y, "z": self.z, "r": self.r}
-    
-    def distance_to(self, other: 'Position') -> float:
-        """다른 위치까지의 거리 계산"""
-        return ((self.x - other.x)**2 + (self.y - other.y)**2 + (self.z - other.z)**2)**0.5
-    
-    def is_within_bounds(self, bounds: Dict[str, Tuple[float, float]]) -> bool:
-        """주어진 범위 내에 있는지 확인"""
-        return (bounds['x'][0] <= self.x <= bounds['x'][1] and
-                bounds['y'][0] <= self.y <= bounds['y'][1] and
-                bounds['z'][0] <= self.z <= bounds['z'][1] and
-                bounds['r'][0] <= self.r <= bounds['r'][1])
-
-class CoordinateValidator:
-    """좌표 검증 클래스"""
-    
-    def __init__(self, workspace_limits: Dict[str, Tuple[float, float]]):
-        self.limits = workspace_limits
-    
-    def validate_position(self, position: Union[Position, Tuple[float, float, float, float]]) -> bool:
-        """위치 유효성 검사"""
-        if isinstance(position, tuple):
-            position = Position(*position)
-        
-        return position.is_within_bounds(self.limits)
-    
-    def clamp_position(self, position: Union[Position, Tuple[float, float, float, float]]) -> Position:
-        """위치를 유효 범위 내로 제한"""
-        if isinstance(position, tuple):
-            position = Position(*position)
-        
-        clamped = Position(
-            x=max(self.limits['x'][0], min(position.x, self.limits['x'][1])),
-            y=max(self.limits['y'][0], min(position.y, self.limits['y'][1])),
-            z=max(self.limits['z'][0], min(position.z, self.limits['z'][1])),
-            r=max(self.limits['r'][0], min(position.r, self.limits['r'][1]))
-        )
-        
-        return clamped
-    
-    def get_safe_approach_position(self, target: Position, offset_z: float = 50.0) -> Position:
-        """안전한 접근 위치 계산"""
-        return Position(target.x, target.y, target.z + offset_z, target.r)
-
-def interpolate_positions(start: Position, end: Position, steps: int = 10) -> List[Position]:
-    """두 위치 사이를 보간하여 중간 위치들 생성"""
-    positions = []
-    
-    for i in range(steps + 1):
-        t = i / steps
-        
-        interpolated = Position(
-            x=start.x + (end.x - start.x) * t,
-            y=start.y + (end.y - start.y) * t,
-            z=start.z + (end.z - start.z) * t,
-            r=start.r + (end.r - start.r) * t
-        )
-        
-        positions.append(interpolated)
-    
-    return positions
-
-# ========== 연결 상태 모니터링 ==========
-
-class ConnectionMonitor:
-    """연결 상태 모니터링 클래스"""
-    
-    def __init__(self, check_interval: float = 5.0):
-        self.check_interval = check_interval
-        self.is_monitoring = False
-        self.monitor_thread: Optional[threading.Thread] = None
-        self.status_callbacks: List[Callable] = []
-        self.last_status = None
-    
-    def add_status_callback(self, callback: Callable[[bool], None]):
-        """상태 변경 콜백 추가"""
-        self.status_callbacks.append(callback)
-    
-    def start_monitoring(self, check_function: Callable[[], bool]):
-        """모니터링 시작"""
-        if self.is_monitoring:
-            return
-        
-        self.is_monitoring = True
-        self.monitor_thread = threading.Thread(
-            target=self._monitor_loop,
-            args=(check_function,),
-            daemon=True
-        )
-        self.monitor_thread.start()
-        logger.info("연결 모니터링 시작")
-    
-    def stop_monitoring(self):
-        """모니터링 중지"""
-        self.is_monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=1.0)
-        logger.info("연결 모니터링 중지")
-    
-    def _monitor_loop(self, check_function: Callable[[], bool]):
-        """모니터링 루프"""
-        while self.is_monitoring:
-            try:
-                current_status = check_function()
-                
-                if current_status != self.last_status:
-                    logger.info(f"연결 상태 변경: {self.last_status} -> {current_status}")
-                    
-                    # 모든 콜백 호출
-                    for callback in self.status_callbacks:
-                        try:
-                            callback(current_status)
-                        except Exception as e:
-                            logger.error(f"상태 콜백 실행 중 오류: {e}")
-                    
-                    self.last_status = current_status
-                
-            except Exception as e:
-                logger.error(f"연결 상태 확인 중 오류: {e}")
-            
-            time.sleep(self.check_interval)
-
-# ========== 성능 측정 도구 ==========
-
-class PerformanceMonitor:
-    """성능 측정 클래스"""
+class CoordinateManager:
+    """좌표 관리 및 검증 클래스"""
     
     def __init__(self):
-        self.metrics = {}
-        self.start_times = {}
-    
-    @contextmanager
-    def measure_time(self, metric_name: str):
-        """시간 측정 컨텍스트 매니저"""
-        start_time = time.time()
-        try:
-            yield
-        finally:
-            elapsed = time.time() - start_time
-            self.record_metric(metric_name, elapsed)
-    
-    def record_metric(self, name: str, value: float):
-        """메트릭 기록"""
-        if name not in self.metrics:
-            self.metrics[name] = []
+        self.current_position = AppConfig.HOME_POSITION.copy()
+        self.target_position = AppConfig.HOME_POSITION.copy()
+        self.position_history = []
+        self.max_history = 100
         
-        self.metrics[name].append({
-            'value': value,
-            'timestamp': time.time()
-        })
+    def validate_coordinates(self, x: float, y: float, z: float, r: float = 0.0) -> bool:
+        """좌표 유효성 검증"""
+        return AppConfig.validate_coordinates(x, y, z, r)
+    
+    def clamp_coordinates(self, x: float, y: float, z: float, r: float = 0.0) -> Tuple[float, float, float, float]:
+        """좌표를 작업 영역 내로 제한"""
+        return AppConfig.clamp_coordinates(x, y, z, r)
+    
+    def calculate_distance(self, pos1: List[float], pos2: List[float]) -> float:
+        """두 점 사이의 3D 거리 계산"""
+        if len(pos1) < 3 or len(pos2) < 3:
+            return 0.0
+            
+        dx = pos1[0] - pos2[0]
+        dy = pos1[1] - pos2[1]
+        dz = pos1[2] - pos2[2]
+        
+        return math.sqrt(dx*dx + dy*dy + dz*dz)
+    
+    def calculate_move_time(self, start_pos: List[float], end_pos: List[float], 
+                           speed: float = None) -> float:
+        """이동 시간 계산"""
+        if speed is None:
+            speed = AppConfig.MOVEMENT_SPEED
+            
+        distance = self.calculate_distance(start_pos, end_pos)
+        return max(distance / speed, 0.1)  # 최소 0.1초
+    
+    def update_position(self, new_position: List[float]):
+        """현재 위치 업데이트"""
+        if len(new_position) >= 4:
+            # 히스토리 저장
+            self.position_history.append({
+                'position': self.current_position.copy(),
+                'timestamp': time.time()
+            })
+            
+            # 히스토리 크기 제한
+            if len(self.position_history) > self.max_history:
+                self.position_history.pop(0)
+            
+            self.current_position = new_position.copy()
+    
+    def get_safe_position(self, x: float, y: float, z: float, r: float = 0.0) -> List[float]:
+        """안전 위치 계산"""
+        return AppConfig.get_safe_position(x, y, z, r)
+    
+    def is_within_workspace(self, x: float, y: float, z: float, r: float = 0.0) -> bool:
+        """작업 영역 내 여부 확인"""
+        return self.validate_coordinates(x, y, z, r)
+    
+    def get_position_history(self, limit: int = 10) -> List[Dict]:
+        """위치 히스토리 반환"""
+        return self.position_history[-limit:] if self.position_history else []
+    
+    def interpolate_path(self, start_pos: List[float], end_pos: List[float], 
+                        steps: int = 10) -> List[List[float]]:
+        """두 점 사이의 보간 경로 생성"""
+        if len(start_pos) < 4 or len(end_pos) < 4:
+            return [start_pos, end_pos]
+            
+        path = []
+        for i in range(steps + 1):
+            t = i / steps
+            interpolated = [
+                start_pos[j] + t * (end_pos[j] - start_pos[j]) 
+                for j in range(4)
+            ]
+            path.append(interpolated)
+            
+        return path
+
+
+class ErrorHandler:
+    """에러 처리 및 복구 클래스"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.error_count = 0
+        self.last_error_time = 0
+        self.error_threshold = 5  # 연속 에러 임계값
+        self.error_reset_time = 300  # 5분 후 에러 카운트 리셋
+        
+    def handle_error(self, error: Exception, context: str = "", 
+                    show_dialog: bool = True) -> bool:
+        """통합 에러 처리"""
+        try:
+            # 에러 카운트 관리
+            current_time = time.time()
+            if current_time - self.last_error_time > self.error_reset_time:
+                self.error_count = 0
+                
+            self.error_count += 1
+            self.last_error_time = current_time
+            
+            # 에러 로깅
+            error_msg = f"{context}: {str(error)}" if context else str(error)
+            self.logger.error(error_msg)
+            self.logger.debug(f"Error traceback: {traceback.format_exc()}")
+            
+            # 에러 분류 및 처리
+            error_code = self._classify_error(error)
+            error_message = ErrorCodes.get_message(error_code)
+            
+            # 사용자에게 알림 (선택적)
+            if show_dialog:
+                self._show_error_dialog(context, error_message)
+            
+            # 복구 시도
+            recovery_success = self._attempt_recovery(error_code, error)
+            
+            # 연속 에러 체크
+            if self.error_count >= self.error_threshold:
+                self._handle_critical_error()
+                
+            return recovery_success
+            
+        except Exception as e:
+            self.logger.critical(f"Error handler failed: {e}")
+            return False
+    
+    def _classify_error(self, error: Exception) -> int:
+        """에러 분류"""
+        error_type = type(error).__name__
+        error_message = str(error).lower()
+        
+        # 연결 관련 에러
+        if any(keyword in error_message for keyword in ['connection', 'socket', 'timeout']):
+            if 'timeout' in error_message:
+                return ErrorCodes.CONNECTION_TIMEOUT
+            return ErrorCodes.CONNECTION_FAILED
+        
+        # 이동 관련 에러
+        if any(keyword in error_message for keyword in ['move', 'position', 'coordinate']):
+            if 'timeout' in error_message:
+                return ErrorCodes.MOVEMENT_TIMEOUT
+            if 'range' in error_message or 'limit' in error_message:
+                return ErrorCodes.POSITION_OUT_OF_RANGE
+            return ErrorCodes.MOVEMENT_FAILED
+        
+        # 그리퍼 관련 에러
+        if any(keyword in error_message for keyword in ['gripper', 'grip', 'clamp']):
+            return ErrorCodes.GRIPPER_FAILED
+        
+        return ErrorCodes.UNKNOWN_ERROR
+    
+    def _show_error_dialog(self, context: str, message: str):
+        """에러 대화상자 표시"""
+        title = "오류 발생" if context else "시스템 오류"
+        full_message = f"{context}\n\n{message}" if context else message
+        
+        try:
+            messagebox.showerror(title, full_message)
+        except Exception:
+            # GUI가 없는 환경에서는 로그만 출력
+            self.logger.error(f"Cannot show error dialog: {full_message}")
+    
+    def _attempt_recovery(self, error_code: int, error: Exception) -> bool:
+        """에러 복구 시도"""
+        if not AppConfig.ERROR_RECOVERY_ENABLED:
+            return False
+            
+        try:
+            if error_code in [ErrorCodes.CONNECTION_FAILED, ErrorCodes.CONNECTION_LOST]:
+                return self._recover_connection()
+            elif error_code == ErrorCodes.MOVEMENT_TIMEOUT:
+                return self._recover_movement()
+            elif error_code == ErrorCodes.POSITION_OUT_OF_RANGE:
+                return self._recover_position()
+            
+        except Exception as e:
+            self.logger.error(f"Recovery attempt failed: {e}")
+            
+        return False
+    
+    def _recover_connection(self) -> bool:
+        """연결 복구"""
+        self.logger.info("Attempting connection recovery...")
+        # 실제 복구 로직은 호출하는 클래스에서 구현
+        return False
+    
+    def _recover_movement(self) -> bool:
+        """이동 복구"""
+        self.logger.info("Attempting movement recovery...")
+        # 안전 위치로 이동 등의 복구 로직
+        return False
+    
+    def _recover_position(self) -> bool:
+        """위치 복구"""
+        self.logger.info("Attempting position recovery...")
+        # 홈 위치로 이동 등의 복구 로직
+        return False
+    
+    def _handle_critical_error(self):
+        """심각한 에러 처리"""
+        self.logger.critical(f"Critical error threshold reached: {self.error_count} errors")
+        try:
+            messagebox.showerror(
+                "심각한 오류", 
+                f"연속 {self.error_count}개의 오류가 발생했습니다.\n"
+                "시스템을 리셋하거나 애플리케이션을 재시작하세요."
+            )
+        except Exception:
+            pass
+    
+    def reset_error_count(self):
+        """에러 카운트 리셋"""
+        self.error_count = 0
+        self.last_error_time = 0
+        self.logger.info("Error count reset")
+
+
+class PerformanceMonitor:
+    """성능 모니터링 클래스"""
+    
+    def __init__(self):
+        self.start_times = {}
+        self.execution_times = {}
+        self.logger = logging.getLogger(__name__)
+        
+    def start_timer(self, operation: str):
+        """타이머 시작"""
+        self.start_times[operation] = time.time()
+        
+    def end_timer(self, operation: str) -> float:
+        """타이머 종료 및 실행 시간 반환"""
+        if operation not in self.start_times:
+            return 0.0
+            
+        execution_time = time.time() - self.start_times[operation]
+        
+        if operation not in self.execution_times:
+            self.execution_times[operation] = []
+        
+        self.execution_times[operation].append(execution_time)
         
         # 최근 100개만 유지
-        if len(self.metrics[name]) > 100:
-            self.metrics[name] = self.metrics[name][-100:]
+        if len(self.execution_times[operation]) > 100:
+            self.execution_times[operation].pop(0)
+            
+        if AppConfig.VERBOSE_LOGGING:
+            self.logger.debug(f"{operation} execution time: {execution_time:.3f}s")
+            
+        return execution_time
     
-    def get_average(self, metric_name: str, recent_count: int = 10) -> Optional[float]:
-        """평균값 계산"""
-        if metric_name not in self.metrics:
-            return None
+    def get_average_time(self, operation: str) -> float:
+        """평균 실행 시간 반환"""
+        if operation not in self.execution_times:
+            return 0.0
         
-        recent_values = [m['value'] for m in self.metrics[metric_name][-recent_count:]]
-        if not recent_values:
-            return None
-        
-        return sum(recent_values) / len(recent_values)
+        times = self.execution_times[operation]
+        return sum(times) / len(times) if times else 0.0
     
-    def get_system_info(self) -> Dict[str, Any]:
-        """시스템 정보 조회"""
-        try:
-            if PSUTIL_AVAILABLE:
-                cpu_percent = psutil.cpu_percent(interval=1)
-                memory = psutil.virtual_memory()
-                disk = psutil.disk_usage('/')
+    def get_performance_report(self) -> Dict[str, Dict[str, float]]:
+        """성능 리포트 생성"""
+        report = {}
+        
+        for operation, times in self.execution_times.items():
+            if times:
+                report[operation] = {
+                    'count': len(times),
+                    'average': sum(times) / len(times),
+                    'min': min(times),
+                    'max': max(times),
+                    'last': times[-1]
+                }
                 
-                return {
-                    'cpu_percent': cpu_percent,
-                    'memory_percent': memory.percent,
-                    'memory_available_mb': memory.available / 1024 / 1024,
-                    'disk_percent': disk.percent,
-                    'disk_free_gb': disk.free / 1024 / 1024 / 1024
-                }
-            else:
-                return {
-                    'cpu_percent': 0,
-                    'memory_percent': 0,
-                    'memory_available_mb': 0,
-                    'disk_percent': 0,
-                    'disk_free_gb': 0,
-                    'note': 'psutil not available'
-                }
-        except Exception as e:
-            logger.error(f"시스템 정보 조회 실패: {e}")
-            return {}
+        return report
 
-# ========== 파일 및 경로 관리 ==========
 
-class FileManager:
-    """파일 관리 클래스"""
+class ThreadSafeLogger:
+    """스레드 안전 로거 래퍼"""
     
-    def __init__(self, base_dir: str = "."):
-        self.base_dir = Path(base_dir)
-        self.ensure_directories()
-    
-    def ensure_directories(self):
-        """필요한 디렉토리 생성"""
-        directories = ['logs', 'data', 'models', 'config', 'temp', 'fonts']
+    def __init__(self, logger_name: str):
+        self.logger = logging.getLogger(logger_name)
+        self.lock = threading.Lock()
         
-        for dir_name in directories:
-            dir_path = self.base_dir / dir_name
-            dir_path.mkdir(exist_ok=True)
-            logger.debug(f"디렉토리 확인: {dir_path}")
+    def _log(self, level: int, message: str, *args, **kwargs):
+        """스레드 안전 로깅"""
+        with self.lock:
+            self.logger.log(level, message, *args, **kwargs)
     
-    def get_log_path(self, log_name: str) -> Path:
-        """로그 파일 경로 반환"""
-        return self.base_dir / 'logs' / f"{log_name}.log"
+    def debug(self, message: str, *args, **kwargs):
+        self._log(logging.DEBUG, message, *args, **kwargs)
     
-    def get_config_path(self, config_name: str) -> Path:
-        """설정 파일 경로 반환"""
-        return self.base_dir / 'config' / f"{config_name}.yaml"
+    def info(self, message: str, *args, **kwargs):
+        self._log(logging.INFO, message, *args, **kwargs)
     
-    def save_json(self, data: Any, filename: str, subdir: str = 'data') -> bool:
-        """JSON 파일 저장"""
-        try:
-            file_path = self.base_dir / subdir / f"{filename}.json"
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.debug(f"JSON 저장 완료: {file_path}")
-            return True
-        except Exception as e:
-            logger.error(f"JSON 저장 실패: {e}")
-            return False
+    def warning(self, message: str, *args, **kwargs):
+        self._log(logging.WARNING, message, *args, **kwargs)
     
-    def load_json(self, filename: str, subdir: str = 'data') -> Optional[Any]:
-        """JSON 파일 로드"""
-        try:
-            file_path = self.base_dir / subdir / f"{filename}.json"
-            if not file_path.exists():
-                return None
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            logger.debug(f"JSON 로드 완료: {file_path}")
-            return data
-        except Exception as e:
-            logger.error(f"JSON 로드 실패: {e}")
-            return None
+    def error(self, message: str, *args, **kwargs):
+        self._log(logging.ERROR, message, *args, **kwargs)
     
-    def save_yaml(self, data: Any, filename: str, subdir: str = 'config') -> bool:
-        """YAML 파일 저장"""
-        try:
-            file_path = self.base_dir / subdir / f"{filename}.yaml"
-            with open(file_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
-            logger.debug(f"YAML 저장 완료: {file_path}")
-            return True
-        except Exception as e:
-            logger.error(f"YAML 저장 실패: {e}")
-            return False
-    
-    def load_yaml(self, filename: str, subdir: str = 'config') -> Optional[Any]:
-        """YAML 파일 로드"""
-        try:
-            file_path = self.base_dir / subdir / f"{filename}.yaml"
-            if not file_path.exists():
-                return None
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-            logger.debug(f"YAML 로드 완료: {file_path}")
-            return data
-        except Exception as e:
-            logger.error(f"YAML 로드 실패: {e}")
-            return None
-    
-    def cleanup_old_files(self, subdir: str = 'logs', max_age_days: int = 7):
-        """오래된 파일 정리"""
-        try:
-            dir_path = self.base_dir / subdir
-            if not dir_path.exists():
-                return
-            
-            cutoff_time = time.time() - (max_age_days * 24 * 60 * 60)
-            
-            for file_path in dir_path.iterdir():
-                if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                    file_path.unlink()
-                    logger.debug(f"오래된 파일 삭제: {file_path}")
-                    
-        except Exception as e:
-            logger.error(f"파일 정리 실패: {e}")
+    def critical(self, message: str, *args, **kwargs):
+        self._log(logging.CRITICAL, message, *args, **kwargs)
 
-# ========== 스레드 안전 큐 ==========
 
-class SafeQueue:
-    """스레드 안전 큐 클래스"""
+class RetryManager:
+    """재시도 관리 클래스"""
     
-    def __init__(self, maxsize: int = 0):
-        self.queue = queue.Queue(maxsize=maxsize)
-    
-    def put(self, item: Any, timeout: Optional[float] = None) -> bool:
-        """아이템 추가"""
-        try:
-            self.queue.put(item, timeout=timeout)
-            return True
-        except queue.Full:
-            logger.warning("큐가 가득 참")
-            return False
-    
-    def get(self, timeout: Optional[float] = None) -> Optional[Any]:
-        """아이템 가져오기"""
-        try:
-            return self.queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
-    
-    def size(self) -> int:
-        """큐 크기 반환"""
-        return self.queue.qsize()
-    
-    def clear(self):
-        """큐 비우기"""
-        while not self.queue.empty():
+    @staticmethod
+    def retry_operation(operation: Callable, max_attempts: int = None, 
+                       delay: float = None, backoff_factor: float = 1.0) -> Any:
+        """재시도 로직을 가진 연산 실행"""
+        if max_attempts is None:
+            max_attempts = AppConfig.MAX_RETRY_ATTEMPTS
+        if delay is None:
+            delay = AppConfig.RETRY_DELAY
+            
+        last_exception = None
+        
+        for attempt in range(max_attempts):
             try:
-                self.queue.get_nowait()
-            except queue.Empty:
-                break
+                return operation()
+            except Exception as e:
+                last_exception = e
+                
+                if attempt < max_attempts - 1:  # 마지막 시도가 아닌 경우
+                    wait_time = delay * (backoff_factor ** attempt)
+                    time.sleep(wait_time)
+                    
+        # 모든 시도 실패
+        if last_exception:
+            raise last_exception
 
-# ========== 네트워크 유틸리티 ==========
 
-def check_network_connection(host: str, port: int, timeout: float = 5.0) -> bool:
-    """네트워크 연결 확인"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-def get_local_ip() -> str:
-    """로컬 IP 주소 조회"""
-    try:
-        # 구글 DNS에 연결을 시도하여 로컬 IP 확인
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-        return local_ip
-    except Exception:
-        return "127.0.0.1"
-
-def find_available_port(start_port: int = 8000, end_port: int = 9000) -> Optional[int]:
-    """사용 가능한 포트 찾기"""
-    for port in range(start_port, end_port + 1):
+class ConfigValidator:
+    """설정 검증 클래스"""
+    
+    @staticmethod
+    def validate_robot_config() -> bool:
+        """로봇 설정 검증"""
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('localhost', port))
-                return port
-        except OSError:
-            continue
-    return None
+            # IP 주소 형식 검증
+            ip_parts = AppConfig.ROBOT_IP.split('.')
+            if len(ip_parts) != 4:
+                return False
+            
+            for part in ip_parts:
+                if not (0 <= int(part) <= 255):
+                    return False
+            
+            # 포트 번호 검증
+            if not (1 <= AppConfig.DASHBOARD_PORT <= 65535):
+                return False
+            if not (1 <= AppConfig.MOVE_PORT <= 65535):
+                return False
+            
+            # 작업 영역 검증
+            if AppConfig.X_MIN >= AppConfig.X_MAX:
+                return False
+            if AppConfig.Y_MIN >= AppConfig.Y_MAX:
+                return False
+            if AppConfig.Z_MIN >= AppConfig.Z_MAX:
+                return False
+            
+            return True
+            
+        except (ValueError, AttributeError):
+            return False
+    
+    @staticmethod
+    def validate_furniture_positions() -> bool:
+        """가구 위치 설정 검증"""
+        try:
+            for furniture, positions in AppConfig.FURNITURE_POSITIONS.items():
+                if 'pickup' not in positions or 'place' not in positions:
+                    return False
+                
+                for pos_type, coords in positions.items():
+                    if len(coords) != 4:
+                        return False
+                    
+                    if not AppConfig.validate_coordinates(*coords):
+                        return False
+            
+            return True
+            
+        except (TypeError, KeyError):
+            return False
 
-# ========== 데이터 변환 유틸리티 ==========
 
-def safe_float_conversion(value: Any, default: float = 0.0) -> float:
+# === 유틸리티 함수 ===
+
+def format_position(position: List[float]) -> str:
+    """위치 정보를 문자열로 포맷"""
+    if len(position) >= 4:
+        return f"X:{position[0]:.1f}, Y:{position[1]:.1f}, Z:{position[2]:.1f}, R:{position[3]:.1f}"
+    return "Invalid position"
+
+def format_time_duration(seconds: float) -> str:
+    """시간을 읽기 쉬운 형태로 포맷"""
+    if seconds < 60:
+        return f"{seconds:.1f}초"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}분 {secs:.1f}초"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}시간 {minutes}분"
+
+def safe_float_convert(value: Any, default: float = 0.0) -> float:
     """안전한 float 변환"""
     try:
         return float(value)
     except (ValueError, TypeError):
         return default
 
-def safe_int_conversion(value: Any, default: int = 0) -> int:
-    """안전한 int 변환"""
-    try:
-        return int(float(value))  # float을 거쳐서 "123.45"도 처리
-    except (ValueError, TypeError):
-        return default
+def clamp_value(value: float, min_val: float, max_val: float) -> float:
+    """값을 범위 내로 제한"""
+    return max(min_val, min(max_val, value))
 
-def parse_robot_response(response: str) -> Dict[str, Any]:
-    """로봇 응답 파싱"""
-    try:
-        if not response:
-            return {'status': 'error', 'message': '빈 응답'}
-        
-        response = response.strip()
-        
-        if response.startswith('OK'):
-            parts = response.split(',')
-            if len(parts) > 1:
-                # 데이터가 포함된 응답
-                data = [safe_float_conversion(part.strip('{}')) for part in parts[1:]]
-                return {'status': 'success', 'data': data}
-            else:
-                # 단순 성공 응답
-                return {'status': 'success'}
-        
-        elif response.startswith('ERROR'):
-            return {'status': 'error', 'message': response}
-        
-        else:
-            return {'status': 'unknown', 'raw': response}
-    
-    except Exception as e:
-        return {'status': 'error', 'message': f'응답 파싱 실패: {e}'}
+def degrees_to_radians(degrees: float) -> float:
+    """도를 라디안으로 변환"""
+    return degrees * math.pi / 180.0
 
-# ========== 전역 인스턴스들 ==========
+def radians_to_degrees(radians: float) -> float:
+    """라디안을 도로 변환"""
+    return radians * 180.0 / math.pi
 
-# 전역 파일 매니저
-file_manager = FileManager()
+def normalize_angle(angle: float) -> float:
+    """각도를 -180~180 범위로 정규화"""
+    while angle > 180:
+        angle -= 360
+    while angle < -180:
+        angle += 360
+    return angle
 
-# 전역 성능 모니터
-performance_monitor = PerformanceMonitor()
+def create_directory_if_not_exists(directory: str):
+    """디렉토리가 없으면 생성"""
+    import os
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
 
-# 전역 연결 모니터
-connection_monitor = ConnectionMonitor()
-
-# ========== 헬퍼 함수들 ==========
-
-def get_timestamp_string() -> str:
-    """타임스탬프 문자열 반환"""
-    return time.strftime('%Y%m%d_%H%M%S')
-
-def format_duration(seconds: float) -> str:
-    """초를 사람이 읽기 쉬운 형태로 변환"""
-    if seconds < 60:
-        return f"{seconds:.1f}초"
-    elif seconds < 3600:
-        minutes = seconds / 60
-        return f"{minutes:.1f}분"
-    else:
-        hours = seconds / 3600
-        return f"{hours:.1f}시간"
-
-def format_bytes(bytes_value: int) -> str:
-    """바이트를 사람이 읽기 쉬운 형태로 변환"""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if bytes_value < 1024:
-            return f"{bytes_value:.1f} {unit}"
-        bytes_value /= 1024
-    return f"{bytes_value:.1f} PB"
-
-@safe_execution(default_return="알 수 없음", log_error=False)
-def get_system_user() -> str:
-    """시스템 사용자명 반환"""
-    return os.getenv('USERNAME') or os.getenv('USER') or "unknown"
-
-def create_error_report(exception: Exception, context: str = "") -> Dict[str, Any]:
-    """에러 리포트 생성"""
-    return {
-        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'exception_type': type(exception).__name__,
-        'exception_message': str(exception),
-        'context': context,
-        'traceback': traceback.format_exc(),
-        'system_info': performance_monitor.get_system_info(),
-        'user': get_system_user()
-    }
-
-# ========== 초기화 및 정리 ==========
-
-def initialize_utils():
-    """유틸리티 초기화"""
-    logger.info("유틸리티 시스템 초기화 완료")
-    
-    # 필요한 디렉토리 생성
-    file_manager.ensure_directories()
-    
-    # 오래된 로그 파일 정리
-    file_manager.cleanup_old_files('logs', max_age_days=7)
-    
-    logger.info(f"로컬 IP: {get_local_ip()}")
-    logger.info(f"시스템 사용자: {get_system_user()}")
-
-def cleanup_utils():
-    """유틸리티 정리"""
-    logger.info("유틸리티 시스템 정리 중...")
-    
-    # 연결 모니터 중지
-    connection_monitor.stop_monitoring()
-    
-    logger.info("유틸리티 시스템 정리 완료")
-
-# 프로그램 시작시 자동 초기화
-if __name__ != "__main__":
-    initialize_utils()
-
-# ========== 테스트 함수 ==========
-
-def test_utils():
-    """유틸리티 함수들 테스트"""
-    print("🧪 유틸리티 테스트 시작")
-    
-    # Position 클래스 테스트
-    pos1 = Position(100, 200, 300, 45)
-    pos2 = Position(150, 250, 350, 90)
-    distance = pos1.distance_to(pos2)
-    print(f"✅ Position 테스트: 거리 = {distance:.2f}")
-    
-    # 좌표 검증 테스트
-    limits = {
-        'x': (-400, 400),
-        'y': (-400, 400),
-        'z': (-200, 200),
-        'r': (-180, 180)
-    }
-    validator = CoordinateValidator(limits)
-    is_valid = validator.validate_position(pos1)
-    print(f"✅ 좌표 검증 테스트: {is_valid}")
-    
-    # 성능 모니터 테스트
-    with performance_monitor.measure_time("test_operation"):
-        time.sleep(0.1)
-    avg_time = performance_monitor.get_average("test_operation")
-    print(f"✅ 성능 모니터 테스트: 평균 시간 = {avg_time:.3f}초")
-    
-    # 파일 매니저 테스트
-    test_data = {"test": "data", "timestamp": time.time()}
-    save_success = file_manager.save_json(test_data, "test")
-    loaded_data = file_manager.load_json("test")
-    print(f"✅ 파일 매니저 테스트: 저장={save_success}, 로드={'성공' if loaded_data else '실패'}")
-    
-    # 네트워크 테스트
-    is_connected = check_network_connection("8.8.8.8", 53, 2.0)
-    local_ip = get_local_ip()
-    print(f"✅ 네트워크 테스트: 연결={is_connected}, IP={local_ip}")
-    
-    print("🎉 모든 유틸리티 테스트 완료!")
-
-if __name__ == "__main__":
-    # 로깅 설정
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # 테스트 실행
-    test_utils()
+def get_timestamp() -> str:
+    """현재 시간의 타임스탬프 문자열 반환"""
+    import datetime
+    return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
