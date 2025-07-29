@@ -1,0 +1,94 @@
+2025-07-29 10:05:11,097 - robot_system - INFO - === Enhanced Dobot Robot & YOLO System Started ===
+2025-07-29 10:05:11,098 - robot_system - INFO - System initialization complete, GUI starting
+2025-07-29 10:05:11,098 - robot_system - INFO - Dobot API Status: Unavailable (Simulation Mode)
+2025-07-29 10:05:11,098 - robot_system - INFO - YOLO Status: Available
+2025-07-29 10:05:11,098 - robot_system - INFO - New pickup logic: Base -> [350, 0, Object_Z_coord, Rotation]
+2025-07-29 10:05:11,249 - robot_system.main - INFO - Font being used: NanumGothic
+2025-07-29 10:05:12,997 - robot_system.yolo - INFO - YOLOv8 model loaded successfully
+2025-07-29 10:05:12,998 - robot_system.controller - WARNING - Dobot API not available, running in simulation mode
+2025-07-29 10:05:12,998 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Dashboard 연결: 192.168.1.6:29999
+2025-07-29 10:05:12,998 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Move 연결: 192.168.1.6:30003
+2025-07-29 10:05:12,998 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 API 연결: 192.168.1.6:30004
+2025-07-29 10:05:12,998 - robot_system.main - WARNING - Robot connection failed, running in simulation mode
+2025-07-29 10:06:13,681 - robot_system.orders - INFO - [2025-07-29 10:06:13] 침대 주문 - 시작
+2025-07-29 10:06:13,692 - robot_system.controller - INFO - Simulation: Moving to position [133, 249, -97.0, -59]
+2025-07-29 10:06:13,692 - robot_system.dobot_dummy - INFO - 🎯 직선 이동: [133, 249, -97.0, -59] (시뮬레이션)
+2025-07-29 10:06:14,246 - robot_system.dobot_dummy - INFO - ✅ 이동 완료: [133.0, 249.0, -97.0, -59.0]
+2025-07-29 10:06:14,554 - robot_system.dobot_dummy - INFO - 🔌 디지털 출력 1: OFF (시뮬레이션)
+2025-07-29 10:06:14,654 - robot_system.controller - INFO - Simulation: Gripper deactivated
+2025-07-29 10:06:16,458 - robot_system.controller - INFO - Simulation: Moving to position [133, 249, -147, -59]
+2025-07-29 10:06:16,459 - robot_system.dobot_dummy - INFO - 🎯 직선 이동: [133, 249, -147, -59] (시뮬레이션)
+2025-07-29 10:06:17,012 - robot_system.dobot_dummy - INFO - ✅ 이동 완료: [133.0, 249.0, -147.0, -59.0]
+2025-07-29 10:06:17,316 - robot_system.dobot_dummy - INFO - 🔌 디지털 출력 1: ON (시뮬레이션)
+2025-07-29 10:06:17,417 - robot_system.controller - INFO - Simulation: Gripper activated
+2025-07-29 10:06:19,421 - robot_system.controller - INFO - Simulation: Moving to position [133, 249, -97.0, -59]
+2025-07-29 10:06:19,422 - robot_system.dobot_dummy - INFO - 🎯 직선 이동: [133, 249, -97.0, -59] (시뮬레이션)
+2025-07-29 10:06:19,975 - robot_system.dobot_dummy - INFO - ✅ 이동 완료: [133.0, 249.0, -97.0, -59.0]
+2025-07-29 10:06:20,284 - robot_system.controller - INFO - Simulation: Moving to position [300, -30, 5, 0]
+2025-07-29 10:06:20,284 - robot_system.dobot_dummy - INFO - 🎯 직선 이동: [300, -30, 5, 0] (시뮬레이션)
+2025-07-29 10:06:20,838 - robot_system.dobot_dummy - INFO - ✅ 이동 완료: [300.0, -30.0, 5.0, 0.0]
+2025-07-29 10:06:21,146 - robot_system.controller - INFO - Simulation: Moving to position [350, 0, -147, -59]
+2025-07-29 10:06:21,147 - robot_system.dobot_dummy - INFO - 🎯 직선 이동: [350, 0, -147, -59] (시뮬레이션)
+2025-07-29 10:06:21,701 - robot_system.dobot_dummy - INFO - ✅ 이동 완료: [350.0, 0.0, -147.0, -59.0]
+2025-07-29 10:06:22,205 - robot_system.dobot_dummy - INFO - 🔌 디지털 출력 1: OFF (시뮬레이션)
+2025-07-29 10:06:22,306 - robot_system.controller - INFO - Simulation: Gripper deactivated
+2025-07-29 10:06:24,311 - robot_system.orders - INFO - [2025-07-29 10:06:24] 침대 주문 - 완료 (최종위치: [350, 0, -147, -59], 단계: 8/8)
+2025-07-29 10:06:34,546 - robot_system.main - INFO - 프로그램이 안전하게 종료되었습니다.
+2025-07-29 10:08:58,671 - robot_system - INFO - === Enhanced Dobot Robot & YOLO System Started ===
+2025-07-29 10:08:58,671 - robot_system - INFO - System initialization complete, GUI starting
+2025-07-29 10:08:58,671 - robot_system - INFO - Dobot API Status: Unavailable (Simulation Mode)
+2025-07-29 10:08:58,671 - robot_system - INFO - YOLO Status: Available
+2025-07-29 10:08:58,671 - robot_system - INFO - New pickup logic: Base -> [350, 0, Object_Z_coord, Rotation]
+2025-07-29 10:08:58,834 - robot_system.main - INFO - Font being used: NanumGothic
+2025-07-29 10:08:58,884 - robot_system.yolo - INFO - YOLOv8 model loaded successfully
+2025-07-29 10:08:58,884 - robot_system.controller - WARNING - Dobot API not available, running in simulation mode
+2025-07-29 10:08:58,884 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Dashboard 연결: 192.168.1.6:29999
+2025-07-29 10:08:58,884 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Move 연결: 192.168.1.6:30003
+2025-07-29 10:08:58,884 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 API 연결: 192.168.1.6:30004
+2025-07-29 10:08:58,884 - robot_system.main - WARNING - Robot connection failed, running in simulation mode
+2025-07-29 10:09:28,445 - robot_system.yolo - ERROR - Label file loading failed: 'utf-8' codec can't decode byte 0x80 in position 64: invalid start byte
+2025-07-29 10:09:44,379 - robot_system.dobot_dummy - INFO - 🔌 디지털 출력 1: OFF (시뮬레이션)
+2025-07-29 10:09:44,480 - robot_system.controller - INFO - Simulation: Gripper deactivated
+2025-07-29 10:09:47,643 - robot_system.dobot_dummy - INFO - 🔌 디지털 출력 1: ON (시뮬레이션)
+2025-07-29 10:09:47,744 - robot_system.controller - INFO - Simulation: Gripper activated
+2025-07-29 10:09:49,723 - robot_system.dobot_dummy - INFO - 🔌 디지털 출력 1: OFF (시뮬레이션)
+2025-07-29 10:09:49,824 - robot_system.controller - INFO - Simulation: Gripper deactivated
+2025-07-29 10:10:07,381 - robot_system.main - INFO - 프로그램이 안전하게 종료되었습니다.
+2025-07-29 10:11:32,418 - robot_system - INFO - === Enhanced Dobot Robot & YOLO System Started ===
+2025-07-29 10:11:32,419 - robot_system - INFO - System initialization complete, GUI starting
+2025-07-29 10:11:32,423 - robot_system - INFO - Dobot API Status: Unavailable (Simulation Mode)
+2025-07-29 10:11:32,423 - robot_system - INFO - YOLO Status: Available
+2025-07-29 10:11:32,423 - robot_system - INFO - New pickup logic: Base -> [350, 0, Object_Z_coord, Rotation]
+2025-07-29 10:11:32,596 - robot_system.main - INFO - Font being used: NanumGothic
+2025-07-29 10:11:32,645 - robot_system.yolo - INFO - YOLOv8 model loaded successfully
+2025-07-29 10:11:32,646 - robot_system.controller - WARNING - Dobot API not available, running in simulation mode
+2025-07-29 10:11:32,646 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Dashboard 연결: 192.168.1.6:29999
+2025-07-29 10:11:32,646 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Move 연결: 192.168.1.6:30003
+2025-07-29 10:11:32,646 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 API 연결: 192.168.1.6:30004
+2025-07-29 10:11:32,646 - robot_system.main - WARNING - Robot connection failed, running in simulation mode
+2025-07-29 10:11:44,381 - robot_system.main - INFO - 프로그램이 안전하게 종료되었습니다.
+2025-07-29 10:11:56,514 - robot_system - INFO - === Enhanced Dobot Robot & YOLO System Started ===
+2025-07-29 10:11:56,514 - robot_system - INFO - System initialization complete, GUI starting
+2025-07-29 10:11:56,514 - robot_system - INFO - Dobot API Status: Unavailable (Simulation Mode)
+2025-07-29 10:11:56,514 - robot_system - INFO - YOLO Status: Available
+2025-07-29 10:11:56,514 - robot_system - INFO - New pickup logic: Base -> [350, 0, Object_Z_coord, Rotation]
+2025-07-29 10:11:56,676 - robot_system.main - INFO - Font being used: NanumGothic
+2025-07-29 10:11:56,754 - robot_system.yolo - INFO - YOLOv8 model loaded successfully
+2025-07-29 10:11:56,754 - robot_system.controller - WARNING - Dobot API not available, running in simulation mode
+2025-07-29 10:11:56,754 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Dashboard 연결: 192.168.1.6:29999
+2025-07-29 10:11:56,754 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Move 연결: 192.168.1.6:30003
+2025-07-29 10:11:56,754 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 API 연결: 192.168.1.6:30004
+2025-07-29 10:11:56,754 - robot_system.main - WARNING - Robot connection failed, running in simulation mode
+2025-07-29 10:12:11,394 - robot_system.main - INFO - 프로그램이 안전하게 종료되었습니다.
+2025-07-29 10:12:42,750 - robot_system - INFO - === Enhanced Dobot Robot & YOLO System Started ===
+2025-07-29 10:12:42,750 - robot_system - INFO - System initialization complete, GUI starting
+2025-07-29 10:12:42,750 - robot_system - INFO - Dobot API Status: Unavailable (Simulation Mode)
+2025-07-29 10:12:42,750 - robot_system - INFO - YOLO Status: Available
+2025-07-29 10:12:42,750 - robot_system - INFO - New pickup logic: Base -> [350, 0, Object_Z_coord, Rotation]
+2025-07-29 10:12:42,908 - robot_system.main - INFO - Font being used: NanumGothic
+2025-07-29 10:12:42,972 - robot_system.yolo - INFO - YOLOv8 model loaded successfully
+2025-07-29 10:12:42,972 - robot_system.controller - WARNING - Dobot API not available, running in simulation mode
+2025-07-29 10:12:42,972 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Dashboard 연결: 192.168.1.6:29999
+2025-07-29 10:12:42,972 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 Move 연결: 192.168.1.6:30003
+2025-07-29 10:12:42,972 - robot_system.dobot_dummy - INFO - 🤖 시뮬레이션 API 연결: 192.168.1.6:30004
+2025-07-29 10:12:42,972 - robot_system.main - WARNING - Robot connection failed, running in simulation mode
