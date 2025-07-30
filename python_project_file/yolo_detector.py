@@ -18,7 +18,7 @@ if DEPENDENCIES['YOLO_AVAILABLE'] and DEPENDENCIES['CV2_AVAILABLE']:
 class YOLODetector:
     """향상된 YOLO 객체 인식 클래스 (main.py 완전 호환)"""
     
-    def __init__(self, model_path="best.pt"):
+    def __init__(self, model_path="./dobot_project-main/python_project_file/best.pt"):
         self.model = None
         self.custom_labels = None
         self.model_loaded = False
